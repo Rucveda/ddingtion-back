@@ -1,0 +1,230 @@
+// 1. 클라이언트 및 DB 연결 설정
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 2. 상태값을 위한 Enum 정의
+enum AuctionStatus {
+  ACTIVE
+  PENDING_TRADE
+  COMPLETED
+  CANCELED
+  EXPIRED
+}
+
+// 💡 [추가] 게시글 타입을 구분하기 위한 Enum
+enum PostType {
+  NOTICE   // 시스템 공지 (관리자용)
+  GENERAL  // 일반 게시글 (유저용)
+  GUIDE    // 가이드/도움말
+}
+
+// 3. 모델 정의
+model User {
+  id                Int      @id @default(autoincrement())
+  loginId           String   @unique
+  passwordHash      String
+  ingameName        String   @unique
+  role              String   @default("USER") // "ADMIN" 포함
+  isBanned         Boolean  @default(false) // 밴 상태
+  reputationScore   Float    @default(5.0)
+  reviewCount       Int      @default(0)
+  successfulTrades  Int      @default(0)
+  preferences       Json?
+
+  // 관계 설정
+  auctions           Auction[]      @relation("SellerAuctions")
+  bids               Bid[]
+  notifications      Notification[] 
+  chatRoomsAsSeller  ChatRoom[]      @relation("SellerChatRooms")
+  chatRoomsAsBuyer   ChatRoom[]      @relation("BuyerChatRooms")
+  messages           Message[]
+  givenReviews       Review[]        @relation("Reviewer")
+  receivedReviews    Review[]        @relation("Reviewee")
+  sentReports        Report[]        @relation("Reporter")
+  receivedReports    Report[]        @relation("Target")
+  
+  // 💡 [확장] 유저가 작성한 게시글 관계 추가
+  posts              Post[]
+
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+}
+
+model Item {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique
+  iconUrl         String?
+  category        String           // "WILD", "ISLAND", "RPG"
+  auctions        Auction[]
+  marketHistories MarketHistory[]
+}
+
+model Auction {
+  id                 Int           @id @default(autoincrement())
+  sellerId           Int
+  itemId             Int
+  description        String?       @db.Text
+  
+  enhancementLevel   Int           @default(0)
+  enhancementRank    String?
+  enchantments       Json?
+  imprint            Json?
+  skills             Json?
+  runes              Json?
+  
+  startPrice         BigInt        
+  currentPrice       BigInt
+  buyNowPrice        BigInt?
+  startTime          DateTime      @default(now())
+  endTime            DateTime
+  status             AuctionStatus @default(ACTIVE)
+
+  seller             User          @relation("SellerAuctions", fields: [sellerId], references: [id])
+  item               Item          @relation(fields: [itemId], references: [id])
+  bids               Bid[]
+  chatRoom           ChatRoom?
+  reviews            Review[]
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+// 💡 [신규/패치] 확장형 게시글 모델 (공지사항 포함)
+model Post {
+  id        Int      @id @default(autoincrement())
+  title     String
+  content   String   @db.Text
+  type      PostType @default(GENERAL) // NOTICE로 설정 시 메인 팝업 노출 가능
+  
+  authorId  Int
+  author    User     @relation(fields: [authorId], references: [id])
+  
+  viewCount Int      @default(0)
+  isPinned  Boolean  @default(false) // 중요 공지 상단 고정용
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type]) // 타입별 검색 최적화
+}
+
+model Bid {
+  id          Int      @id @default(autoincrement())
+  auctionId   Int
+  bidderId    Int
+  bidAmount   BigInt
+
+  auction     Auction  @relation(fields: [auctionId], references: [id])
+  bidder      User     @relation(fields: [bidderId], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+model MarketVariable {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  category  String
+  label     String
+  value     Float
+  updatedAt DateTime @updatedAt
+}
+
+model MarketHistory {
+  id                 Int      @id @default(autoincrement())
+  itemId             Int
+  item               Item     @relation(fields: [itemId], references: [id])
+  
+  enhancementLevel   Int      @default(0)
+  enhancementRank    String?
+  enchantments       Json?
+  imprint            Json?
+  skills             Json?
+  runes              Json?
+  
+  price              BigInt
+  tradeDate          DateTime @default(now())
+  
+  isLegacy           Boolean  @default(false)
+  isValid            Boolean  @default(true)
+  excludeReason      String?  @db.Text
+
+  createdAt          DateTime @default(now())
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String   
+  message   String   @db.Text
+  link      String?  
+  isRead    Boolean  @default(false)
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+model ChatRoom {
+  id           Int      @id @default(autoincrement())
+  auctionId    Int?     @unique
+  sellerId     Int
+  buyerId      Int
+  status       String   @default("ACTIVE")
+  
+  isAdminChat  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auction      Auction? @relation(fields: [auctionId], references: [id])
+  seller       User     @relation("SellerChatRooms", fields: [sellerId], references: [id])
+  buyer        User     @relation("BuyerChatRooms", fields: [buyerId], references: [id])
+  messages     Message[]
+  reports      Report[]
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  roomId    Int
+  senderId  Int
+  content   String   @db.Text
+  isRead    Boolean  @default(false)
+
+  room      ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [senderId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Review {
+  id          Int      @id @default(autoincrement())
+  auctionId   Int
+  reviewerId  Int
+  revieweeId  Int
+  rating      Int
+  comment     String?  @db.Text
+
+  auction     Auction  @relation(fields: [auctionId], references: [id])
+  reviewer    User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  reviewee    User     @relation("Reviewee", fields: [revieweeId], references: [id])
+
+  createdAt   DateTime @default(now())
+}
+
+model Report {
+  id          Int      @id @default(autoincrement())
+  roomId      Int
+  reporterId  Int
+  targetId    Int
+  reason      String   @db.Text
+  isResolved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  room        ChatRoom @relation(fields: [roomId], references: [id])
+  reporter    User     @relation("Reporter", fields: [reporterId], references: [id])
+  target      User     @relation("Target", fields: [targetId], references: [id])
+}
