@@ -1,9 +1,10 @@
 // 1. 환경 변수(.env) 로드
-require('dotenv').config();
+import 'dotenv/config';
 
-const { Pool } = require('pg');
-const { PrismaPg } = require('@prisma/adapter-pg');
-const { PrismaClient } = require('@prisma/client');
+import pkg from 'pg';
+const { Pool } = pkg;
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '@prisma/client';
 
 /**
  * 💡 BigInt JSON 직렬화 패치
@@ -48,4 +49,4 @@ const testConnection = async () => {
 
 testConnection();
 
-module.exports = prisma;
+export default prisma;

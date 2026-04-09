@@ -1,4 +1,4 @@
-const prisma = require('./db');
+import prisma from './db.js';
 
 const setupSocket = (io) => {
   io.on('connection', (socket) => {
@@ -120,4 +120,4 @@ const setupSocket = (io) => {
   });
 };
 
-module.exports = setupSocket;
+export default setupSocket;

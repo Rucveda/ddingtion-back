@@ -1,11 +1,10 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const prisma = require('../db');
-const authenticateToken = require('../middlewares/authMiddleware');
+import prisma from '../db.js';
+import authenticateToken from '../middlewares/authMiddleware.js';
 
 /**
- * [GET] 글 목록 조회
- * 💡 패치: NOTICE 타입 요청 시 최신글 1개만 반환하도록 최적화
+ * 글 목록 조회
  */
 router.get('/', async (req, res) => {
   try {
@@ -108,4 +107,4 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

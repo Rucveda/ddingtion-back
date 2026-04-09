@@ -1,7 +1,7 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const prisma = require('../db');
-const authenticateToken = require('../middlewares/authMiddleware');
+import prisma from '../db.js';
+import authenticateToken from '../middlewares/authMiddleware.js';
 
 router.post('/', authenticateToken, async (req, res) => {
   const { auctionId, revieweeId, rating, comment } = req.body;
@@ -46,4 +46,4 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

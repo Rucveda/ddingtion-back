@@ -1,7 +1,7 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const prisma = require('../db'); 
-const authenticateToken = require('../middlewares/authMiddleware');
+import prisma from '../db.js';
+import authenticateToken from '../middlewares/authMiddleware.js';
 
 // 모든 알림 API는 로그인이 필요함
 router.use(authenticateToken);
@@ -91,4 +91,4 @@ router.delete('/all/clear', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

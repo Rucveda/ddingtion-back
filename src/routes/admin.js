@@ -1,10 +1,10 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const authenticateToken = require('../middlewares/authMiddleware');
-const prisma = require('../db');
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import authenticateToken from '../middlewares/authMiddleware.js';
+import prisma from '../db.js';
 
 /**
  * 📂 이미지 저장 설정 (Multer)
@@ -440,4 +440,4 @@ router.get('/users', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,9 +1,9 @@
 import 'dotenv/config';
-const express = require('express');
-const authenticateToken = require('../middlewares/authMiddleware');
-const prisma = require('../db');
-const { Queue } = require('bullmq');
-const Redis = require('ioredis');
+import express from 'express';
+import authenticateToken from '../middlewares/authMiddleware.js';
+import prisma from '../db.js';
+import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 
 const router = express.Router();
 
@@ -487,4 +487,4 @@ router.post('/:id/buy', authenticateToken, async (req, res) => {
     }
 });
 
-module.exports = router;
+export default router;

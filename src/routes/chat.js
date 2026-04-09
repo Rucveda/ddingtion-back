@@ -1,7 +1,7 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
-const authenticateToken = require('../middlewares/authMiddleware');
-const prisma = require('../db');
+import authenticateToken from '../middlewares/authMiddleware.js';
+import prisma from '../db.js';
 
 // 모든 채팅 API는 로그인이 필요함
 router.use(authenticateToken);
@@ -179,4 +179,4 @@ router.get('/rooms/:id/messages', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,23 +1,23 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
-const prisma = require('./db'); 
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url'; // ESM에서 __dirname 대용으로 필요
+import { Server } from 'socket.io';
+import prisma from './db.js'; // 확장자 .js를 꼭 붙여주세요!
 
 // [워커 가동]
-require('./workers/auctionWorker'); 
+import './workers/auctionWorker.js'; 
 
 // --- [라우터 임포트] ---
-const authRoutes = require('./routes/auth');
-const auctionRoutes = require('./routes/auctions');
-const adminRoutes = require('./routes/admin'); 
-const chatRoutes = require('./routes/chat'); 
-const notificationRoutes = require('./routes/notifications');
-const reviewRoutes = require('./routes/reviews');
-// 💡 [신규 패치] 게시판/공지사항 라우터 추가
-const postsRoutes = require('./routes/posts'); 
+import authRoutes from './routes/auth.js';
+import auctionRoutes from './routes/auctions.js';
+import adminRoutes from './routes/admin.js'; 
+import chatRoutes from './routes/chat.js'; 
+import notificationRoutes from './routes/notifications.js';
+import reviewRoutes from './routes/reviews.js';
+import postsRoutes from './routes/posts.js';
 
 const app = express();
 const server = http.createServer(app);

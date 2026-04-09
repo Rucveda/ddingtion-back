@@ -1,5 +1,5 @@
-const jwt = require('jsonwebtoken');
-const prisma = require('../db');
+import jwt from 'jsonwebtoken';
+import prisma from '../db.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'my_super_secret_key_123';
 
@@ -52,4 +52,4 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-module.exports = authenticateToken;
+export default authenticateToken;

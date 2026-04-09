@@ -1,6 +1,6 @@
-const { Worker } = require('bullmq');
-const Redis = require('ioredis');
-const prisma = require('./db');
+import { Worker } from 'bullmq';
+import Redis from 'ioredis';
+import prisma from './db.js';
 
 const redisConnection = new Redis(process.env.REDIS_URL, {
   maxRetriesPerRequest: null,

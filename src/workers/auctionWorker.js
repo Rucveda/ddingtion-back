@@ -1,8 +1,7 @@
 import 'dotenv/config';
-
-const { Worker } = require('bullmq');
-const Redis = require('ioredis');
-const prisma = require('../db');
+import { Worker } from 'bullmq';
+import Redis from 'ioredis';
+import prisma from '../db.js';
 
 // Redis 연결
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
