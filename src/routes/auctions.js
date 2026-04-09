@@ -7,14 +7,21 @@ import Redis from 'ioredis';
 
 const router = express.Router();
 
-// --- ⚙️ Redis 및 BullMQ 설정 ---
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+/**
+ * 🛠️ [Redis 연결 패치]
+ * Render 배포 환경(production)에서는 TLS 연결이 필요할 수 있습니다.
+ * 또한 REDIS_URL이 없을 경우를 대비한 안전 장치를 추가합니다.
+ */
+const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const redisConnection = new Redis(redisUrl, {
     maxRetriesPerRequest: null,
+    // Render/Managed Redis 사용 시 필요할 수 있는 TLS 설정
+    ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
 });
+
 const auctionQueue = new Queue('auctionQueue', { connection: redisConnection });
 
-// --- 📊 [Constants] 마켓 데이터 동기화 ---
-
+// --- 📊 [Constants] 마켓 데이터 동기화 (기존 코드 유지) ---
 const ISLAND_ENHANCE_TABLE = [
     { lv: 1, gold: 5000, rate: 100, mats: { low: 1, mid: 0, high: 0 } },
     { lv: 2, gold: 25000, rate: 100, mats: { low: 2, mid: 0, high: 0 } },
@@ -111,9 +118,8 @@ const RPG_WEAPON_META = {
     "대검": "영웅"
 };
 
-// 💡 [Patch] 신규 전투 스킬 시스템 (슬롯 해금 & 문장 활성화 구조)
 const RPG_SKILL_COMMON_RATES = [90, 80, 70, 50, 20, 10, 5];
-const SKILL_SLOT_SEAL_COSTS = [1, 3, 5, 10]; // 1, 2, 3, 4슬롯 순차 소모량
+const SKILL_SLOT_SEAL_COSTS = [1, 3, 5, 10]; 
 
 const RPG_SKILL_SYSTEM = {
     "스태프": {
@@ -178,11 +184,8 @@ const RPG_SKILL_SYSTEM = {
     }
 };
 
-// --- 🧠 [Inference Engine] 시세 계산 및 추론 로직 ---
+// --- 🧠 [Inference Engine] 시세 계산 및 추론 로직 (기존 코드 유지) ---
 
-/**
- * 🧮 아일랜드 각인 기댓값 계산
- */
 const calculateIslandImprintCost = (imprints, getV) => {
     if (!imprints) return 0;
     const CONTRACT_PER_LEVEL = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25 };
@@ -201,9 +204,6 @@ const calculateIslandImprintCost = (imprints, getV) => {
     return totalCost;
 };
 
-/**
- * 🧮 RPG 전투 스킬 기댓값 계산 (슬롯 해금비 1/3/5/10 누적 합산 적용)
- */
 const calculateRPGSkillCost = (weaponName, skills, getV) => {
     if (!skills || Object.keys(skills).length === 0) return 0;
 
@@ -213,7 +213,6 @@ const calculateRPGSkillCost = (weaponName, skills, getV) => {
 
     let totalSkillCost = 0;
     
-    // 1. [슬롯 해금비] 해방의 인장 누적 계산
     const skillCount = Object.keys(skills).length;
     const sealPrice = getV("MAT_RPG_해방의 인장");
     let totalSealNeeded = 0;
@@ -222,17 +221,13 @@ const calculateRPGSkillCost = (weaponName, skills, getV) => {
     }
     totalSkillCost += (totalSealNeeded * sealPrice);
 
-    // 2. [스킬 개별 비용] 개방의 문장 및 각성석 기반 강화비
     const emblemPrice = getV("MAT_RPG_개방의 문장");
     const awakenStonePrice = getV(`MAT_RPG_${skillConfig.material}`);
 
     Object.entries(skills).forEach(([skillName, level]) => {
         const info = skillConfig.skills[skillName];
         if (info) {
-            // 개방의 문장 및 활성화 골드
             totalSkillCost += (info.emblem * emblemPrice) + info.unlockGold;
-
-            // 단계별 강화 기댓값
             for (let i = 0; i < level; i++) {
                 const tryCost = info.enhanceGold[i] + awakenStonePrice;
                 totalSkillCost += tryCost * (100 / RPG_SKILL_COMMON_RATES[i]);
@@ -275,7 +270,6 @@ const getFairPrice = async (itemId, options) => {
         const dbBasePrice = getV(`MAT_RPG_BASE_${item.name}`);
         buildCost = dbBasePrice > 0 ? dbBasePrice : getV(`MAT_RPG_BASE_${RPG_WEAPON_META[item.name] || "입문"}`);
 
-        // 전투 스킬 및 슬롯 가치 합산
         buildCost += calculateRPGSkillCost(item.name, options.skills, getV);
 
         if (options.runes) {
@@ -449,7 +443,7 @@ router.post('/', authenticateToken, async (req, res) => {
         });
 
         await auctionQueue.add('endAuction', { auctionId: newAuction.id }, { delay: (parseInt(durationHours) || 24) * 3600000 });
-        res.status(201).json({ ...newAuction, id: newAuction.id.toString() });
+        res.status(201).json({ ...newAuction, id: newAuction.id.toString(), startPrice: newAuction.startPrice.toString(), currentPrice: newAuction.currentPrice.toString() });
     } catch (error) {
         res.status(500).json({ error: "등록 실패" });
     }

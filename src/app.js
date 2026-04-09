@@ -25,18 +25,38 @@ import postsRoutes from './routes/posts.js';
 const app = express();
 const server = http.createServer(app);
 
+/**
+ * 🛠️ [환경 변수 패치] 
+ * 하드코딩된 프론트엔드 주소를 환경 변수(FRONTEND_URL)로 대체합니다.
+ * 값이 없을 경우를 대비해 기본값도 유지합니다.
+ */
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://ddingtion-front.onrender.com";
+
+// --- [Socket.io 설정] ---
 const io = new Server(server, {
-  cors: { origin: "https://ddingtion-front.onrender.com", methods: ["GET", "POST"] , credentials: true }
+  cors: { 
+    origin: FRONTEND_URL, 
+    methods: ["GET", "POST"], 
+    credentials: true 
+  }
 });
 
 app.set('io', io);
 
+// --- [미들웨어 설정] ---
 app.use(cors({
-  origin: "https://ddingtion-front.onrender.com", // 내 프론트엔드 주소만 허용
-  methods: ["GET", "POST", "PUT", "DELETE"],    // 허용할 HTTP 메서드들
-  credentials: true                             // 쿠키나 인증 정보를 주고받을 때 필수
+  origin: FRONTEND_URL,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
 }));
+
 app.use(express.json());
+
+/**
+ * 📂 [이미지 경로 패치]
+ * 이제 Supabase Storage를 사용하므로 로컬 /uploads 정적 폴더 제공 코드는 사실상 필요 없습니다.
+ * 하지만 기존 데이터와의 호환성을 위해 유지하거나, 필요 없다면 나중에 삭제하세요.
+ */
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // DB 연결 확인
@@ -54,8 +74,6 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/chat', chatRoutes); 
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/reviews', reviewRoutes);
-// 💡 [신규 패치] /api/posts 경로 활성화
-// 이 코드가 추가되어야 프론트엔드의 request("/api/posts") 요청이 404 없이 작동합니다.
 app.use('/api/posts', postsRoutes); 
 
 // --- [통합 웹소켓 로직] ---
@@ -208,9 +226,8 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 8080; // Render가 부여하는 포트를 우선 사용
+const PORT = process.env.PORT || 8080;
 
 server.listen(PORT, '0.0.0.0', () => { 
-  // '0.0.0.0'은 외부 호스트의 접속을 허용하기 위해 필요합니다.
   console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);
 });

@@ -1,36 +1,22 @@
+import 'dotenv/config';
 import express from 'express';
 const router = express.Router();
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import prisma from '../db.js';
+import { createClient } from '@supabase/supabase-js'; // 추가
 
-// ✅ ESM 환경에서 경로 설정을 위해 추가
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ✅ admin.js 위치가 src/routes 라면 상위 폴더로 두 번 이동해야 합니다.
-const uploadPath = path.join(__dirname, '../../public/uploads');
+// ✅ Supabase 클라이언트 설정
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 /**
- * 📂 이미지 저장 설정 (Multer)
+ * 📂 [이미지 저장 설정 패치] 
+ * diskStorage를 지우고 memoryStorage로 변경합니다.
+ * 이제 서버 하드디스크가 아닌 메모리에 파일을 담아 Supabase로 바로 쏩니다.
  */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // 폴더가 없으면 생성
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'item-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+const storage = multer.memoryStorage();
 const upload = multer({ 
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 } 
@@ -40,17 +26,12 @@ const upload = multer({
  * 👑 관리자 권한 확인 미들웨어
  */
 const isAdmin = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
-  }
+  if (!req.user) return res.status(401).json({ error: "인증되지 않은 사용자입니다." });
   const userRole = req.user.role ? req.user.role.toUpperCase() : '';
-  if (userRole !== 'ADMIN') {
-    return res.status(403).json({ error: "관리자 권한이 필요합니다." });
-  }
+  if (userRole !== 'ADMIN') return res.status(403).json({ error: "관리자 권한이 필요합니다." });
   next();
 };
 
-// 모든 라우트에 인증 및 관리자 체크 적용
 router.use(authenticateToken);
 router.use(isAdmin);
 
@@ -253,28 +234,47 @@ router.get('/items', async (req, res) => {
 });
 
 /**
- * 새 아이템 등록
+ * 💉 [신규 패치] 새 아이템 등록 (Supabase Storage 연동)
  */
 router.post('/items', upload.single('image'), async (req, res) => {
   try {
     const { name, category } = req.body;
-    if (!name || !category) return res.status(400).json({ error: "이름과 카테고리는 필수 입력 사항입니다." });
-    if (!req.file) return res.status(400).json({ error: "아이콘 이미지 파일이 누락되었습니다." });
+    if (!name || !category) return res.status(400).json({ error: "이름과 카테고리는 필수입니다." });
+    if (!req.file) return res.status(400).json({ error: "이미지 파일이 누락되었습니다." });
 
     const existingItem = await prisma.item.findUnique({ where: { name } });
-    if (existingItem) return res.status(400).json({ error: "이미 동일한 이름의 아이템이 존재합니다." });
+    if (existingItem) return res.status(400).json({ error: "이미 존재하는 아이템 이름입니다." });
 
-    const iconUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    const newItem = await prisma.item.create({ data: { name, category, iconUrl } });
+    // 1️⃣ Supabase Storage 업로드
+    const fileName = `item-${Date.now()}${path.extname(req.file.originalname)}`;
+    const { data, error } = await supabase.storage
+      .from('images') // Supabase에서 만든 버킷 이름
+      .upload(fileName, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true
+      });
+
+    if (error) throw error;
+
+    // 2️⃣ 공개 URL 생성
+    const { data: { publicUrl } } = supabase.storage
+      .from('images')
+      .getPublicUrl(fileName);
+
+    // 3️⃣ DB 저장 (서버 주소가 아닌 Supabase 주소 저장)
+    const newItem = await prisma.item.create({ 
+      data: { name, category, iconUrl: publicUrl } 
+    });
 
     res.status(201).json(newItem);
   } catch (error) {
+    console.error("Upload Error:", error);
     res.status(500).json({ error: "아이템 등록 중 서버 오류가 발생했습니다." });
   }
 });
 
 /**
- * 아이템 영구 삭제
+ * 💉 [신규 패치] 아이템 삭제 (Supabase Storage에서도 삭제)
  */
 router.delete('/items/:id', async (req, res) => {
   try {
@@ -283,9 +283,9 @@ router.delete('/items/:id', async (req, res) => {
     if (!item) return res.status(404).json({ error: "아이템 없음" });
 
     await prisma.$transaction(async (tx) => {
+      // 1. 연관 데이터 삭제 로직 (기존 유지)
       const auctions = await tx.auction.findMany({ where: { itemId } });
       const auctionIds = auctions.map(a => a.id);
-
       if (auctionIds.length > 0) {
         await tx.bid.deleteMany({ where: { auctionId: { in: auctionIds } } });
         await tx.chatRoom.deleteMany({ where: { auctionId: { in: auctionIds } } });
@@ -294,15 +294,16 @@ router.delete('/items/:id', async (req, res) => {
       await tx.auction.deleteMany({ where: { itemId } });
       await tx.marketHistory.deleteMany({ where: { itemId } });
 
-      if (item.iconUrl && item.iconUrl.includes('/uploads/')) {
-        const fileName = item.iconUrl.split('/uploads/')[1];
-        const filePath = path.join(__dirname, '../../public/uploads', fileName);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      // 2. Supabase Storage 파일 삭제
+      if (item.iconUrl && item.iconUrl.includes('supabase.co')) {
+        const fileName = item.iconUrl.split('/').pop();
+        await supabase.storage.from('images').remove([fileName]);
       }
+
       await tx.item.delete({ where: { id: itemId } });
     });
 
-    res.json({ message: "아이템 및 연관 데이터 전체 삭제 완료" });
+    res.json({ message: "아이템 및 클라우드 이미지 삭제 완료" });
   } catch (error) {
     res.status(500).json({ error: "삭제 중 서버 오류" });
   }
