@@ -3,15 +3,23 @@ const router = express.Router();
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import prisma from '../db.js';
+
+// ✅ ESM 환경에서 경로 설정을 위해 추가
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// ✅ admin.js 위치가 src/routes 라면 상위 폴더로 두 번 이동해야 합니다.
+const uploadPath = path.join(__dirname, '../../public/uploads');
 
 /**
  * 📂 이미지 저장 설정 (Multer)
  */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../../public/uploads');
+    // 폴더가 없으면 생성
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
     }

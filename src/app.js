@@ -3,9 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import path from 'path';
-import { fileURLToPath } from 'url'; // ESM에서 __dirname 대용으로 필요
+import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
-import prisma from './db.js'; // 확장자 .js를 꼭 붙여주세요!
+import prisma from './db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // [워커 가동]
 import './workers/auctionWorker.js'; 
