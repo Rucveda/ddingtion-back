@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const prisma = require('../db');

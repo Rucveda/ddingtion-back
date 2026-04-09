@@ -1,3 +1,4 @@
+import 'dotenv/config';
 const express = require('express');
 const authenticateToken = require('../middlewares/authMiddleware');
 const prisma = require('../db');

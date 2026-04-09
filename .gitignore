@@ -1,7 +1,24 @@
-node_modules
-# Keep environment variables out of version control
+# 의존성 폴더 (깃허브에 올릴 필요 없음)
+node_modules/
+
+# 💡 [중요] 환경 변수 파일 (절대 보안!)
 .env
+.env.local
+.env.dev
 
-/generated/prisma
+# 💡 [중요] 유저가 업로드한 이미지 (서버 배포 시 별도 관리)
+/public/uploads/
 
-/generated/prisma
+# Prisma 자동 생성 파일 (데이터베이스 스키마와 충돌 방지)
+/generated/
+prisma/client-sql/
+
+# 운영체제 및 에디터 임시 파일
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 로그 파일 (에러 기록 등)
+*.log
+npm-debug.log*
