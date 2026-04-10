@@ -8,20 +8,17 @@ import Redis from 'ioredis';
 const router = express.Router();
 
 /**
- * 🛠️ [Redis 연결 패치]
- * Render 배포 환경(production)에서는 TLS 연결이 필요할 수 있습니다.
- * 또한 REDIS_URL이 없을 경우를 대비한 안전 장치를 추가합니다.
+ * 🛠️ [Redis 연결]
  */
 const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const redisConnection = new Redis(redisUrl, {
     maxRetriesPerRequest: null,
-    // Render/Managed Redis 사용 시 필요할 수 있는 TLS 설정
     ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
 });
 
 const auctionQueue = new Queue('auctionQueue', { connection: redisConnection });
 
-// --- 📊 [Constants] 마켓 데이터 동기화 (기존 코드 유지) ---
+// --- 📊 [Constants] 마켓 데이터 ---
 const ISLAND_ENHANCE_TABLE = [
     { lv: 1, gold: 5000, rate: 100, mats: { low: 1, mid: 0, high: 0 } },
     { lv: 2, gold: 25000, rate: 100, mats: { low: 2, mid: 0, high: 0 } },
@@ -111,13 +108,6 @@ const RPG_ENHANCE_DATA = {
     ]
 };
 
-const RPG_WEAPON_META = {
-    "스태프": "입문", "망치": "입문",
-    "총": "견습",
-    "활": "정예", "창": "정예",
-    "대검": "영웅"
-};
-
 const RPG_SKILL_COMMON_RATES = [90, 80, 70, 50, 20, 10, 5];
 const SKILL_SLOT_SEAL_COSTS = [1, 3, 5, 10]; 
 
@@ -184,7 +174,7 @@ const RPG_SKILL_SYSTEM = {
     }
 };
 
-// --- 🧠 [Inference Engine] 시세 계산 및 추론 로직 (기존 코드 유지) ---
+// --- 🧠 [Inference Engine] 시세 계산 및 추론 로직 ---
 
 const calculateIslandImprintCost = (imprints, getV) => {
     if (!imprints) return 0;
@@ -207,14 +197,16 @@ const calculateIslandImprintCost = (imprints, getV) => {
 const calculateRPGSkillCost = (weaponName, skills, getV) => {
     if (!skills || Object.keys(skills).length === 0) return 0;
 
-    const weaponType = Object.keys(RPG_SKILL_SYSTEM).find(key => weaponName.includes(key));
+    const weaponType = ["스태프", "망치", "총", "활", "창", "대검"].find(t => weaponName.includes(t));
+    if (!weaponType) return 0;
+
     const skillConfig = RPG_SKILL_SYSTEM[weaponType];
     if (!skillConfig) return 0;
 
     let totalSkillCost = 0;
-    
     const skillCount = Object.keys(skills).length;
     const sealPrice = getV("MAT_RPG_해방의 인장");
+    
     let totalSealNeeded = 0;
     for (let i = 0; i < skillCount; i++) {
         totalSealNeeded += (SKILL_SLOT_SEAL_COSTS[i] || 0);
@@ -248,14 +240,27 @@ const getFairPrice = async (itemId, options) => {
     let buildCost = 0;
     const category = item.category.toUpperCase();
 
+    // 1. 야생 카테고리 (상급 인챈트 한계 돌파 로직 포함)
     if (category.includes("WILD")) {
         if (options.enchantments) {
-            Object.entries(options.enchantments).forEach(([name, tier]) => {
-                const pricePer10Percent = getV(`MAT_BOOK_${name}`);
-                buildCost += (pricePer10Percent * 10) * tier;
+            Object.entries(options.enchantments).forEach(([name, level]) => {
+                const HIGH_LIMITS = { "날카로움": 5, "미끼": 3, "보호": 4, "약탈": 3, "행운": 3, "효율": 5 };
+                const normalMax = HIGH_LIMITS[name] || 5;
+                const normalPrice = getV(`MAT_BOOK_${name}`);
+
+                if (level <= normalMax) {
+                    buildCost += (normalPrice * 10) * level;
+                } else {
+                    buildCost += (normalPrice * 10) * normalMax;
+                    const highBookPrice = getV(`MAT_HIGH_BOOK_${name}`);
+                    const highRate = getV(`MAT_HIGH_RATE_${name}`) || 10;
+                    const highLevelCost = highBookPrice / (highRate / 100);
+                    buildCost += highLevelCost * (level - normalMax);
+                }
             });
         }
     } 
+    // 2. 아일랜드 카테고리
     else if (category.includes("ISLAND")) {
         buildCost += calculateIslandImprintCost(options.imprint, getV);
         const stones = { low: getV("MAT_STONE_LOW"), mid: getV("MAT_STONE_MID"), high: getV("MAT_STONE_HIGH") };
@@ -266,9 +271,11 @@ const getFairPrice = async (itemId, options) => {
             buildCost += (step.gold + matCost) / (step.rate / 100);
         }
     } 
+    // 3. RPG 카테고리 (무기 종류별 순정가 매칭 로직 포함)
     else if (category.includes("RPG")) {
-        const dbBasePrice = getV(`MAT_RPG_BASE_${item.name}`);
-        buildCost = dbBasePrice > 0 ? dbBasePrice : getV(`MAT_RPG_BASE_${RPG_WEAPON_META[item.name] || "입문"}`);
+        const weaponType = ["스태프", "망치", "총", "활", "창", "대검"].find(t => item.name.includes(t));
+        const dbBasePrice = weaponType ? getV(`MAT_RPG_BASE_${weaponType}`) : 0;
+        buildCost = dbBasePrice > 0 ? dbBasePrice : getV(`MAT_RPG_BASE_${options.enhancementRank || "입문"}`);
 
         buildCost += calculateRPGSkillCost(item.name, options.skills, getV);
 
@@ -278,7 +285,7 @@ const getFairPrice = async (itemId, options) => {
             });
         }
 
-        const rank = RPG_WEAPON_META[item.name] || options.enhancementRank || "입문";
+        const rank = options.enhancementRank || "입문";
         const steps = RPG_ENHANCE_DATA[rank] || [];
         for (let i = 0; i < (options.enhancementLevel || 0); i++) {
             const step = steps[i];
@@ -287,7 +294,7 @@ const getFairPrice = async (itemId, options) => {
                 Object.entries(step.mats).forEach(([mName, count]) => {
                     matTotal += (getV(`MAT_RPG_${mName}`) * count);
                 });
-                buildCost += (step.gold + matTotal);
+                buildCost += (step.gold + matTotal); // RPG 강화 기댓값은 현재 100% 가정
             }
         }
     }
