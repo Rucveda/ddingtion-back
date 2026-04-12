@@ -109,7 +109,7 @@ const RPG_ENHANCE_DATA = {
 };
 
 const RPG_SKILL_COMMON_RATES = [90, 80, 70, 50, 20, 10, 5];
-const SKILL_SLOT_SEAL_COSTS = [1, 3, 5, 10]; 
+const SKILL_SLOT_SEAL_COSTS = [1, 3, 5, 10];
 
 const RPG_SKILL_SYSTEM = {
     "스태프": {
@@ -179,8 +179,8 @@ const RPG_SKILL_SYSTEM = {
 const calculateIslandImprintCost = (imprints, getV) => {
     if (!imprints) return 0;
     const CONTRACT_PER_LEVEL = { 1: 5, 2: 10, 3: 15, 4: 20, 5: 25 };
-    const SUCCESS_RATE = 0.05; 
-    const ATTEMPTS_REQUIRED = 1 / SUCCESS_RATE; 
+    const SUCCESS_RATE = 0.05;
+    const ATTEMPTS_REQUIRED = 1 / SUCCESS_RATE;
 
     const contractPrice = getV("MAT_ISLAND_CONTRACT");
     let totalCost = 0;
@@ -206,7 +206,7 @@ const calculateRPGSkillCost = (weaponName, skills, getV) => {
     let totalSkillCost = 0;
     const skillCount = Object.keys(skills).length;
     const sealPrice = getV("MAT_RPG_해방의 인장");
-    
+
     let totalSealNeeded = 0;
     for (let i = 0; i < skillCount; i++) {
         totalSealNeeded += (SKILL_SLOT_SEAL_COSTS[i] || 0);
@@ -259,7 +259,7 @@ const getFairPrice = async (itemId, options) => {
                 }
             });
         }
-    } 
+    }
     // 2. 아일랜드 카테고리
     else if (category.includes("ISLAND")) {
         buildCost += calculateIslandImprintCost(options.imprint, getV);
@@ -270,7 +270,7 @@ const getFairPrice = async (itemId, options) => {
             const matCost = (step.mats.low * stones.low) + (step.mats.mid * stones.mid) + (step.mats.high * stones.high);
             buildCost += (step.gold + matCost) / (step.rate / 100);
         }
-    } 
+    }
     // 3. RPG 카테고리 (무기 종류별 순정가 매칭 로직 포함)
     else if (category.includes("RPG")) {
         const weaponType = ["스태프", "망치", "총", "활", "창", "대검"].find(t => item.name.includes(t));
@@ -280,7 +280,7 @@ const getFairPrice = async (itemId, options) => {
         buildCost += calculateRPGSkillCost(item.name, options.skills, getV);
 
         if (options.runes) {
-            options.runes.forEach((r) => { 
+            options.runes.forEach((r) => {
                 if (r?.type && r?.grade) buildCost += getV(`MAT_RUNE_${r.type}_${r.grade}`);
             });
         }
@@ -367,6 +367,33 @@ router.get('/market-analysis/:itemId', async (req, res) => {
     }
 });
 
+router.get('/completed', async (req, res) => {
+    try {
+        const itemId = parseInt(req.query.itemId);
+        const limit = parseInt(req.query.limit) || 5;
+
+        if (isNaN(itemId)) {
+            return res.status(400).json({ error: "아이템 ID가 필요합니다." });
+        }
+
+        const completedAuctions = await prisma.marketHistory.findMany({
+            where: { itemId, isValid: true },
+            orderBy: { tradeDate: 'desc' },
+            take: limit
+        });
+
+        const safeData = completedAuctions.map(a => ({
+            ...a,
+            price: a.price.toString() // BigInt 변환
+        }));
+
+        res.json(safeData);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "기록 조회 실패" });
+    }
+});
+
 router.get('/', async (req, res) => {
     try {
         const now = new Date();
@@ -378,7 +405,7 @@ router.get('/', async (req, res) => {
             },
             orderBy: { endTime: 'asc' }
         });
-        
+
         const safeData = auctions.map(a => ({
             ...a,
             startPrice: a.startPrice.toString(),
