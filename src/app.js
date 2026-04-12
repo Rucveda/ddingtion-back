@@ -30,7 +30,7 @@ const server = http.createServer(app);
  * 하드코딩된 프론트엔드 주소를 환경 변수(FRONTEND_URL)로 대체합니다.
  * 값이 없을 경우를 대비해 기본값도 유지합니다.
  */
-const FRONTEND_URL = process.env.FRONTEND_URL || "ddingtion-front.vercel.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://ddingtion-front.vercel.app";
 
 // --- [Socket.io 설정] ---
 const io = new Server(server, {
