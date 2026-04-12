@@ -515,4 +515,46 @@ router.post('/:id/buy', authenticateToken, async (req, res) => {
     }
 });
 
+// --- [채팅방 종료 라우터] ---
+router.patch('/:id/close', authenticateToken, async (req, res) => {
+    try {
+        const roomId = parseInt(req.params.id);
+        
+        // 해당 채팅방의 상태를 CLOSED로 변경
+        const updatedRoom = await prisma.chatRoom.update({
+            where: { id: roomId },
+            data: { status: 'CLOSED' }
+        });
+
+        res.json({ message: "채팅방이 성공적으로 종료되었습니다.", room: updatedRoom });
+    } catch (error) {
+        console.error("채팅 종료 실패:", error);
+        res.status(500).json({ error: "채팅 종료 처리 중 오류가 발생했습니다." });
+    }
+});
+
+// --- [리뷰 등록 라우터] ---
+router.post('/reviews', authenticateToken, async (req, res) => {
+    try {
+        const { auctionId, targetId, rating, comment } = req.body;
+
+        const newReview = await prisma.review.create({
+            data: {
+                auctionId: parseInt(auctionId),
+                authorId: req.user.id, // 작성자 (현재 로그인 유저)
+                targetId: parseInt(targetId), // 평가 대상자
+                rating: parseInt(rating),
+                comment: comment || "매너 있는 거래였습니다.",
+            }
+        });
+
+        // (선택사항) 대상자의 평점 평균 업데이트 로직이 필요하다면 여기에 추가
+
+        res.status(201).json(newReview);
+    } catch (error) {
+        console.error("리뷰 등록 실패:", error);
+        res.status(500).json({ error: "리뷰 등록 중 오류가 발생했습니다." });
+    }
+});
+
 export default router;
