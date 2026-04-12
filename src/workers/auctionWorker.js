@@ -17,7 +17,10 @@ const worker = new Worker('auctionQueue', async (job) => {
       // 1. 해당 경매 정보와 입찰 기록 조회
       const auction = await prisma.auction.findUnique({
         where: { id: auctionId },
-        include: { bids: { orderBy: { bidAmount: 'desc' }, take: 1 } }
+        include: { 
+          bids: { orderBy: { bidAmount: 'desc' }, take: 1 },
+          item: true
+        }
       });
 
       // 이미 종료된 경매거나 없으면 패스
@@ -56,6 +59,20 @@ const worker = new Worker('auctionQueue', async (job) => {
               type: 'TRADE',
               message: `축하합니다! [${auctionId}]번 경매에 낙찰되셨습니다. 채팅을 확인하세요!`,
               link: `/auction/${auctionId}`
+            }
+          }),
+          // 💡 [핵심 패치] 정상 낙찰된 기록을 시세(MarketHistory) 데이터에 추가
+          prisma.marketHistory.create({
+            data: {
+              itemId: auction.itemId,
+              price: lastBid.bidAmount,
+              enhancementLevel: auction.enhancementLevel,
+              enhancementRank: auction.enhancementRank,
+              enchantments: auction.enchantments,
+              imprint: auction.imprint,
+              skills: auction.skills,
+              runes: auction.runes,
+              isValid: true
             }
           })
         ]);

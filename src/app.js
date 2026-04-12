@@ -5,6 +5,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
+import Redis from 'ioredis'; // 💡 Redis 임포트
 import prisma from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,32 @@ const io = new Server(server, {
 });
 
 app.set('io', io);
+
+// --- [Redis Pub/Sub 구독 설정] ---
+const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const redisOptions = {
+  maxRetriesPerRequest: null,
+  ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
+};
+const subscriber = new Redis(redisUrl, redisOptions);
+const AUCTION_EVENTS_CHANNEL = 'auction-events';
+
+subscriber.subscribe(AUCTION_EVENTS_CHANNEL, (err) => {
+  if (err) {
+    console.error('❌ Redis 구독 실패:', err);
+  } else {
+    console.log(`✅ Redis 채널 구독 성공: ${AUCTION_EVENTS_CHANNEL}`);
+  }
+});
+
+// 워커로부터 경매 종료 이벤트를 수신하여 클라이언트에 전파
+subscriber.on('message', (channel, message) => {
+  if (channel === AUCTION_EVENTS_CHANNEL) {
+    const data = JSON.parse(message);
+    io.to(`auction_${data.auctionId}`).emit('auction_finished', data);
+    io.emit('refresh_chat_rooms'); // 낙찰자와 판매자의 채팅 목록 갱신
+  }
+});
 
 // --- [미들웨어 설정] ---
 app.use(cors({
