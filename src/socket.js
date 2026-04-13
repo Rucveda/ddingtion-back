@@ -157,7 +157,12 @@ const setupSocket = (io) => {
           data: { isRead: true }
         });
         io.to(`chat_${pRoomId}`).emit('messages_read', { roomId: pRoomId, userId: pUserId });
-        io.emit('refresh_chat_rooms');
+        
+        // 💡 최적화 패치: 모든 접속자에게 API 호출을 강제하여 서버가 멈추는 현상(DDoS) 방지
+        const room = await prisma.chatRoom.findUnique({ where: { id: pRoomId } });
+        if (room) {
+          io.to(`user_${room.sellerId}`).to(`user_${room.buyerId}`).emit('refresh_chat_rooms');
+        }
       } catch (err) {
         console.error("채팅방 입장/읽음 처리 오류:", err.message);
       }
@@ -186,7 +191,8 @@ const setupSocket = (io) => {
         });
 
         io.to(`chat_${pRoomId}`).emit('new_message', newMessage);
-        io.emit('refresh_chat_rooms');
+        // 💡 최적화 패치: 메시지를 주고받는 당사자들의 채팅방 목록만 새로고침
+        io.to(`user_${room.sellerId}`).to(`user_${room.buyerId}`).emit('refresh_chat_rooms');
       } catch (err) {
         console.error("메시지 저장 실패:", err.message);
       }
