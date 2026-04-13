@@ -10,6 +10,7 @@ const setupSocket = (io) => {
     ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
   };
   const subscriber = new Redis(redisUrl, redisOptions);
+  const redisConnection = new Redis(redisUrl, redisOptions); // 💡 상태 저장/조회용 일반 클라이언트 추가
   const AUCTION_EVENTS_CHANNEL = 'auction-events';
 
   subscriber.subscribe(AUCTION_EVENTS_CHANNEL, (err) => {
@@ -32,6 +33,9 @@ const setupSocket = (io) => {
   // --- [통합 웹소켓 로직] ---
   io.on('connection', (socket) => {
     console.log('유저 접속:', socket.id);
+    
+    // 💡 유저의 실제 접속 IP 추출
+    const clientIp = socket.handshake.headers['x-forwarded-for']?.split(',')[0]?.trim() || socket.handshake.address;
 
     // --- 🔔 알림 설정 ---
     socket.on('setup_notifications', (userId) => {
@@ -61,6 +65,9 @@ const setupSocket = (io) => {
         }
         
         const parsedUserId = parseInt(decodedUser.id);
+        
+        // 💡 보안 패치: 유저의 최신 접속 IP를 Redis에 갱신 (1일 보관)
+        await redisConnection.set(`user_ip:${parsedUserId}`, clientIp, 'EX', 86400);
         const parsedAuctionId = parseInt(auctionId);
         const parsedBidAmount = BigInt(bidAmount);
 
@@ -87,6 +94,12 @@ const setupSocket = (io) => {
           }
           if (auction.sellerId === parsedUserId) {
             throw new Error("본인이 등록한 경매에는 입찰할 수 없습니다.");
+          }
+          
+          // 💡 어뷰징 방어: 판매자의 최근 접속 IP와 현재 입찰자의 IP가 동일한 경우 (다중 계정 자전거래 차단)
+          const sellerIp = await redisConnection.get(`user_ip:${auction.sellerId}`);
+          if (sellerIp && sellerIp === clientIp) {
+            throw new Error("동일한 네트워크(IP) 환경에서는 입찰할 수 없습니다. (다중 계정 악용 방지)");
           }
 
           const newBid = await tx.bid.create({ 
@@ -176,8 +189,19 @@ const setupSocket = (io) => {
 
         const pRoomId = parseInt(roomId);
         const pSenderId = parseInt(decodedUser.id);
+        
+        await redisConnection.set(`user_ip:${pSenderId}`, clientIp, 'EX', 86400); // IP 갱신
 
         if (isNaN(pRoomId) || isNaN(pSenderId)) return;
+
+        // 💡 어뷰징 방어: 빈 메시지 전송 차단
+        if (!content || content.trim() === "") throw new Error("빈 메시지는 전송할 수 없습니다.");
+
+        // 💡 어뷰징 방어: 매크로 채팅 도배 방지 (2초당 3회 초과 시 차단)
+        const rateKey = `ratelimit:chat:${pSenderId}`;
+        const msgCount = await redisConnection.incr(rateKey);
+        if (msgCount === 1) await redisConnection.expire(rateKey, 2); 
+        if (msgCount > 3) throw new Error("메시지 전송이 너무 빠릅니다. 도배 방지를 위해 잠시 후 시도해주세요.");
 
         // 💡 보안 패치: 채팅방 소속 검증 (권한이 없는 유저의 메시지 발송 차단)
         const room = await prisma.chatRoom.findUnique({ where: { id: pRoomId } });

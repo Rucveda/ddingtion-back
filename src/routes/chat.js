@@ -63,7 +63,8 @@ router.post('/rooms/admin', async (req, res) => {
     let room = await prisma.chatRoom.findFirst({
       where: {
         buyerId: userId,
-        isAdminChat: true 
+        isAdminChat: true,
+        status: 'ACTIVE' // 💡 어뷰징 방어: 이미 활성화된 문의방이 있는지 확인하여 중복 생성 차단
       },
       include: {
         seller: { select: { id: true, ingameName: true } },

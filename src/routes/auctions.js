@@ -455,6 +455,10 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', authenticateToken, async (req, res) => {
     try {
+        // 💡 보안 패치: 경매 등록 시 판매자의 IP를 기록하여 다중 계정 자전거래 추적
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+        await redisConnection.set(`user_ip:${req.user.id}`, clientIp, 'EX', 86400);
+
         const { itemId, startPrice, buyNowPrice, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes } = req.body;
 
         // 💡 보안 패치: 경매 등록 데이터 논리 검증 (음수, 즉시 구매가 모순, 비정상 기간 방어)
@@ -500,6 +504,10 @@ router.post('/', authenticateToken, async (req, res) => {
 
 router.post('/:id/buy', authenticateToken, async (req, res) => {
     try {
+        // 💡 구매 시도 시 IP 업데이트
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+        await redisConnection.set(`user_ip:${req.user.id}`, clientIp, 'EX', 86400);
+
         const auctionId = parseInt(req.params.id);
         
         const { room, finalPrice } = await prisma.$transaction(async (tx) => {
@@ -509,6 +517,12 @@ router.post('/:id/buy', authenticateToken, async (req, res) => {
 
             if (!auction || auction.status !== 'ACTIVE') {
                 throw new Error("이미 판매 완료되었거나 무효한 경매입니다.");
+            }
+            
+            // 💡 어뷰징 방어: 판매자 IP와 구매자 IP가 동일할 경우 차단
+            const sellerIp = await redisConnection.get(`user_ip:${auction.sellerId}`);
+            if (sellerIp && sellerIp === clientIp) {
+                throw new Error("동일한 네트워크(IP) 환경에서는 즉시 구매할 수 없습니다. (다중 계정 악용 방지)");
             }
             if (!auction.buyNowPrice) {
                 throw new Error("즉시 구매가 불가능한 경매입니다.");

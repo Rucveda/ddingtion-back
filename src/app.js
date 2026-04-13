@@ -44,6 +44,9 @@ app.set('io', io);
 // --- [통합 소켓 모듈 마운트] ---
 setupSocket(io);
 
+// 💡 보안 패치: 프록시(Render 등 클라우드) 환경에서 실제 유저의 IP를 정확히 식별하기 위해 설정
+app.set('trust proxy', 1);
+
 // --- [미들웨어 설정] ---
 app.use(cors({
   origin: FRONTEND_URL,
