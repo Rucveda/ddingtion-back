@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import prisma from '../db.js';
 import { createClient } from '@supabase/supabase-js'; // 추가
+import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 
 // ✅ Supabase 클라이언트 설정
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -21,6 +23,16 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 } 
 });
+
+/**
+ * 🛠️ [Redis 및 BullMQ 큐 설정]
+ */
+const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const redisConnection = new Redis(redisUrl, {
+  maxRetriesPerRequest: null,
+  ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
+});
+const auctionQueue = new Queue('auctionQueue', { connection: redisConnection });
 
 /**
  * 👑 관리자 권한 확인 미들웨어
@@ -350,28 +362,26 @@ router.delete('/support/rooms/:id', async (req, res) => {
  */
 router.delete('/auctions/:id', async (req, res) => {
   try {
+    const auctionId = parseInt(req.params.id);
     await prisma.auction.update({
-      where: { id: parseInt(req.params.id) },
+      where: { id: auctionId },
       data: { status: 'CANCELED' }
     });
+
+    // 💡 패치: 관리자 강제 취소 시 대기 중인 예약 작업(Job)도 삭제
+    try {
+      const job = await auctionQueue.getJob(`auction_${auctionId}`);
+      if (job) {
+        await job.remove();
+        console.log(`[관리자] 경매 ${auctionId} 강제 취소로 인한 큐 정리 완료`);
+      }
+    } catch (jobErr) {
+      console.error("관리자 BullMQ 큐 제거 중 예외 (무시됨):", jobErr);
+    }
+
     res.json({ message: "경매 취소 성공" });
   } catch (error) {
     res.status(500).json({ error: "경매 취소 실패" });
-  }
-});
-
-/**
- * 유저 권한 변경
- */
-router.patch('/users/:id/role', async (req, res) => {
-  try {
-    await prisma.user.update({
-      where: { id: parseInt(req.params.id) },
-      data: { role: req.body.role.toUpperCase() }
-    });
-    res.json({ message: "권한 변경 완료" });
-  } catch (error) {
-    res.status(500).json({ error: "권한 변경 실패" });
   }
 });
 

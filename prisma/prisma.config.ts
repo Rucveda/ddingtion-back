@@ -15,6 +15,8 @@ export default defineConfig({
    */
   datasource: {
     url: process.env.DATABASE_URL,
+    // @ts-ignore: Prisma 7의 타입 정의가 아직 IDE에 완벽히 반영되지 않아 생기는 경고 무시
+    directUrl: process.env.DIRECT_URL,
   },
 
   /**

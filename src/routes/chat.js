@@ -26,7 +26,15 @@ router.get('/rooms', async (req, res) => {
         messages: { 
           orderBy: { createdAt: 'desc' }, 
           take: 1 
-        } 
+        },
+        // 💡 누락된 기능 패치: 내가 읽지 않은 메시지 갯수를 집계하여 프론트엔드 알림 뱃지 활성화
+        _count: {
+          select: {
+            messages: {
+              where: { isRead: false, senderId: { not: userId } }
+            }
+          }
+        }
       },
       orderBy: { updatedAt: 'desc' }
     });
@@ -100,32 +108,16 @@ router.patch('/rooms/:id/close', async (req, res) => {
 
     if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
 
-    // 💡 평점 시스템 반영 (상대방 찾기)
-    const targetId = room.sellerId === userId ? room.buyerId : room.sellerId;
+    // 💡 보안 패치: 본인이 속한 채팅방이 아니면 조작할 수 없도록 방어
+    if (room.sellerId !== userId && room.buyerId !== userId) {
+      return res.status(403).json({ error: "권한이 없습니다." });
+    }
 
-    await prisma.$transaction(async (tx) => {
-      // 1. 상대방 평점 및 거래 횟수 업데이트
-      const targetUser = await tx.user.findUnique({ where: { id: targetId } });
-      if (targetUser) {
-        const newReviewCount = targetUser.reviewCount + 1;
-        // 기본 평점 5.0 부여 (추후 입력받는 구조로 확장 가능)
-        const newScore = ((targetUser.reputationScore * targetUser.reviewCount) + 5) / newReviewCount;
-
-        await tx.user.update({
-          where: { id: targetId },
-          data: { 
-            reputationScore: newScore, 
-            reviewCount: newReviewCount,
-            successfulTrades: { increment: 1 }
-          }
-        });
-      }
-
-      // 2. 채팅방 상태 변경 (ACTIVE -> ARCHIVED)
-      await tx.chatRoom.update({
-        where: { id: parseInt(id) },
-        data: { status: 'ARCHIVED' }
-      });
+    // 💡 패치: 평점 및 거래 횟수 조작 로직은 reviews.js로 완전히 이관
+    // 여기서는 순수하게 채팅방의 상태만 종료(ARCHIVED)로 변경합니다.
+    await prisma.chatRoom.update({
+      where: { id: parseInt(id) },
+      data: { status: 'ARCHIVED' }
     });
 
     res.json({ message: "거래가 안전하게 종료되었습니다." });
@@ -145,6 +137,14 @@ router.post('/rooms/:id/report', async (req, res) => {
     const reporterId = req.user.id;
 
     if (!reason) return res.status(400).json({ error: "신고 사유를 입력해주세요." });
+
+    // 💡 보안 패치: 본인이 참여한 채팅방인지 먼저 확인
+    const room = await prisma.chatRoom.findUnique({ where: { id: parseInt(id) } });
+    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
+    
+    if (room.sellerId !== reporterId && room.buyerId !== reporterId) {
+      return res.status(403).json({ error: "신고 권한이 없습니다." });
+    }
 
     const report = await prisma.report.create({
       data: {
@@ -168,6 +168,14 @@ router.post('/rooms/:id/report', async (req, res) => {
 router.get('/rooms/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
+
+    // 💡 보안 패치: 해당 채팅방 참여자(또는 관리자)가 아니면 메시지 열람 차단
+    const room = await prisma.chatRoom.findUnique({ where: { id: parseInt(id) } });
+    if (!room || (room.sellerId !== userId && room.buyerId !== userId && req.user.role !== 'ADMIN')) {
+      return res.status(403).json({ error: "채팅방 접근 권한이 없습니다." });
+    }
+
     const messages = await prisma.message.findMany({
       where: { roomId: parseInt(id) },
       include: { sender: { select: { id: true, ingameName: true } } },

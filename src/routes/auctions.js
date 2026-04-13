@@ -403,7 +403,8 @@ router.get('/', async (req, res) => {
                 item: true,
                 seller: { select: { id: true, ingameName: true, reputationScore: true } }
             },
-            orderBy: { endTime: 'asc' }
+            orderBy: { endTime: 'asc' },
+            take: 200 // 💡 성능 최적화 패치: 데이터 무한 스크롤(OOM) 방지를 위해 최대 200개까지만 노출
         });
 
         const safeData = auctions.map(a => ({
@@ -455,15 +456,25 @@ router.get('/:id', async (req, res) => {
 router.post('/', authenticateToken, async (req, res) => {
     try {
         const { itemId, startPrice, buyNowPrice, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes } = req.body;
+
+        // 💡 보안 패치: 경매 등록 데이터 논리 검증 (음수, 즉시 구매가 모순, 비정상 기간 방어)
+        const pStartPrice = BigInt(startPrice);
+        if (pStartPrice <= 0n) return res.status(400).json({ error: "시작가는 0보다 커야 합니다." });
+        if (buyNowPrice && BigInt(buyNowPrice) <= pStartPrice) {
+            return res.status(400).json({ error: "즉시 구매가는 시작가보다 높아야 합니다." });
+        }
+        const dHours = parseInt(durationHours) || 24;
+        if (dHours <= 0 || dHours > 168) return res.status(400).json({ error: "경매 기간은 1~168시간(7일) 사이여야 합니다." });
+
         const endTime = new Date();
-        endTime.setHours(endTime.getHours() + (parseInt(durationHours) || 24));
+        endTime.setHours(endTime.getHours() + dHours);
 
         const newAuction = await prisma.auction.create({
             data: {
                 sellerId: req.user.id,
                 itemId: parseInt(itemId),
-                startPrice: BigInt(startPrice),
-                currentPrice: BigInt(startPrice),
+                startPrice: pStartPrice,
+                currentPrice: pStartPrice,
                 buyNowPrice: buyNowPrice ? BigInt(buyNowPrice) : null,
                 endTime,
                 status: 'ACTIVE',
@@ -476,7 +487,11 @@ router.post('/', authenticateToken, async (req, res) => {
             }
         });
 
-        await auctionQueue.add('endAuction', { auctionId: newAuction.id }, { delay: (parseInt(durationHours) || 24) * 3600000 });
+        // 💡 패치: 추후 잡(Job)을 쉽게 찾고 제어할 수 있도록 고유 jobId 부여
+        await auctionQueue.add('endAuction', { auctionId: newAuction.id }, { 
+            delay: (parseInt(durationHours) || 24) * 3600000,
+            jobId: `auction_${newAuction.id}` 
+        });
         res.status(201).json({ ...newAuction, id: newAuction.id.toString(), startPrice: newAuction.startPrice.toString(), currentPrice: newAuction.currentPrice.toString() });
     } catch (error) {
         res.status(500).json({ error: "등록 실패" });
@@ -486,15 +501,38 @@ router.post('/', authenticateToken, async (req, res) => {
 router.post('/:id/buy', authenticateToken, async (req, res) => {
     try {
         const auctionId = parseInt(req.params.id);
-        const auction = await prisma.auction.findUnique({ where: { id: auctionId } });
+        
+        const { room, finalPrice } = await prisma.$transaction(async (tx) => {
+            // 💡 패치: 동시 구매 충돌을 막기 위해 Row Lock 적용
+            const auctions = await tx.$queryRaw`SELECT * FROM "Auction" WHERE id = ${auctionId} FOR UPDATE`;
+            const auction = auctions[0];
 
-        if (!auction || auction.status !== 'ACTIVE') return res.status(400).json({ error: "무효한 경매" });
+            if (!auction || auction.status !== 'ACTIVE') {
+                throw new Error("이미 판매 완료되었거나 무효한 경매입니다.");
+            }
+            if (!auction.buyNowPrice) {
+                throw new Error("즉시 구매가 불가능한 경매입니다.");
+            }
+            if (auction.sellerId === req.user.id) {
+                throw new Error("본인이 등록한 물품은 구매할 수 없습니다.");
+            }
 
-        const [updated, , room] = await prisma.$transaction([
-            prisma.auction.update({ where: { id: auctionId }, data: { status: 'COMPLETED', currentPrice: auction.buyNowPrice } }),
-            prisma.bid.create({ data: { auctionId, bidderId: req.user.id, bidAmount: auction.buyNowPrice } }),
-            prisma.chatRoom.create({ data: { auctionId, sellerId: auction.sellerId, buyerId: req.user.id } }),
-            prisma.marketHistory.create({
+            await tx.auction.update({ where: { id: auctionId }, data: { status: 'COMPLETED', currentPrice: auction.buyNowPrice } });
+            await tx.bid.create({ data: { auctionId, bidderId: req.user.id, bidAmount: auction.buyNowPrice } });
+            
+            const newRoom = await tx.chatRoom.create({ data: { auctionId, sellerId: auction.sellerId, buyerId: req.user.id, isAdminChat: false } });
+            
+            // 💡 보안 패치: 소켓에서 불안전하게 처리하던 알림을 서버 트랜잭션 내부에서 생성 (위조 원천 차단)
+            await tx.notification.create({
+                data: {
+                    userId: auction.sellerId,
+                    type: "TRADE",
+                    message: "전리품 거래가 즉시 성사되었습니다. 구매자를 평가해주세요!",
+                    link: `/auction/${auctionId}`
+                }
+            });
+            
+            await tx.marketHistory.create({
                 data: {
                     itemId: auction.itemId,
                     enhancementLevel: auction.enhancementLevel,
@@ -506,54 +544,35 @@ router.post('/:id/buy', authenticateToken, async (req, res) => {
                     price: auction.buyNowPrice,
                     isValid: true
                 }
-            })
-        ]);
+            });
+            
+            return { room: newRoom, finalPrice: auction.buyNowPrice };
+        });
+
+        // 💡 패치: 즉시 구매 시 불필요해진 BullMQ 경매 마감 작업 취소 및 제거
+        try {
+            const job = await auctionQueue.getJob(`auction_${auctionId}`);
+            if (job) {
+                await job.remove();
+                console.log(`[경매 ${auctionId}] 불필요한 마감 예약 큐가 정상적으로 제거되었습니다.`);
+            }
+        } catch (jobErr) {
+            console.error("BullMQ 큐 제거 중 예외 (무시됨):", jobErr);
+        }
+
+        // 💡 보안 패치: 프론트엔드의 위조 가능한 소켓 이벤트 대신 서버가 직접 브로드캐스트
+        const eventPayload = {
+            auctionId,
+            winner: req.user.ingameName,
+            price: finalPrice.toString(),
+            reason: 'BUY_NOW'
+        };
+        await redisConnection.publish('auction-events', JSON.stringify(eventPayload));
 
         res.json({ message: "완료", roomId: room.id });
     } catch (error) {
-        res.status(500).json({ error: "처리 실패" });
-    }
-});
-
-// --- [채팅방 종료 라우터] ---
-router.patch('/:id/close', authenticateToken, async (req, res) => {
-    try {
-        const roomId = parseInt(req.params.id);
-        
-        // 해당 채팅방의 상태를 CLOSED로 변경
-        const updatedRoom = await prisma.chatRoom.update({
-            where: { id: roomId },
-            data: { status: 'CLOSED' }
-        });
-
-        res.json({ message: "채팅방이 성공적으로 종료되었습니다.", room: updatedRoom });
-    } catch (error) {
-        console.error("채팅 종료 실패:", error);
-        res.status(500).json({ error: "채팅 종료 처리 중 오류가 발생했습니다." });
-    }
-});
-
-// --- [리뷰 등록 라우터] ---
-router.post('/reviews', authenticateToken, async (req, res) => {
-    try {
-        const { auctionId, targetId, rating, comment } = req.body;
-
-        const newReview = await prisma.review.create({
-            data: {
-                auctionId: parseInt(auctionId),
-                authorId: req.user.id, // 작성자 (현재 로그인 유저)
-                targetId: parseInt(targetId), // 평가 대상자
-                rating: parseInt(rating),
-                comment: comment || "매너 있는 거래였습니다.",
-            }
-        });
-
-        // (선택사항) 대상자의 평점 평균 업데이트 로직이 필요하다면 여기에 추가
-
-        res.status(201).json(newReview);
-    } catch (error) {
-        console.error("리뷰 등록 실패:", error);
-        res.status(500).json({ error: "리뷰 등록 중 오류가 발생했습니다." });
+        console.error("Buy Now Error:", error);
+        res.status(error.message.includes("무효") ? 400 : 500).json({ error: error.message || "처리 실패" });
     }
 });
 

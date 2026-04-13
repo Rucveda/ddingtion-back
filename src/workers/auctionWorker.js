@@ -3,10 +3,14 @@ import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import prisma from '../db.js';
 
-// Redis 연결
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
+// 💡 패치: 클라우드 Redis(Render, Upstash 등)를 위한 TLS 설정 및 퍼블리셔 추가
+const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const redisOptions = {
   maxRetriesPerRequest: null,
-});
+  ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
+};
+const redisConnection = new Redis(redisUrl, redisOptions);
+const publisher = new Redis(redisUrl, redisOptions);
 
 // 워커 생성
 const worker = new Worker('auctionQueue', async (job) => {
@@ -18,7 +22,8 @@ const worker = new Worker('auctionQueue', async (job) => {
       const auction = await prisma.auction.findUnique({
         where: { id: auctionId },
         include: { 
-          bids: { orderBy: { bidAmount: 'desc' }, take: 1 },
+          // 💡 패치: 낙찰자 이름을 클라이언트에 전달하기 위해 bidder 정보 포함
+          bids: { orderBy: { bidAmount: 'desc' }, take: 1, include: { bidder: { select: { ingameName: true } } } },
           item: true
         }
       });
@@ -57,7 +62,7 @@ const worker = new Worker('auctionQueue', async (job) => {
             data: {
               userId: lastBid.bidderId,
               type: 'TRADE',
-              message: `축하합니다! [${auctionId}]번 경매에 낙찰되셨습니다. 채팅을 확인하세요!`,
+              message: `축하합니다! [${auction.item.name}] 경매에 낙찰되셨습니다. 채팅을 확인하세요!`,
               link: `/auction/${auctionId}`
             }
           }),
@@ -76,7 +81,12 @@ const worker = new Worker('auctionQueue', async (job) => {
             }
           })
         ]);
-        console.log(`[경매 ${auctionId}] 낙찰 성공 - 구매자 ID: ${lastBid.bidderId}`);
+        
+        // 💡 핵심 패치: 워커가 백엔드 소켓 서버(socket.js)에게 경매 종료 이벤트를 발송하여 모든 유저의 화면을 갱신
+        const eventPayload = { auctionId, winner: lastBid.bidder.ingameName, price: lastBid.bidAmount.toString(), reason: 'BID_WIN' };
+        await publisher.publish('auction-events', JSON.stringify(eventPayload));
+        
+        console.log(`[경매 ${auctionId}] 낙찰 성공 - 구매자: ${lastBid.bidder.ingameName}`);
       }
     } catch (error) {
       console.error(`[경매 ${auctionId}] 자동 마감 처리 중 오류:`, error);

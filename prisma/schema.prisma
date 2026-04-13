@@ -92,6 +92,10 @@ model Auction {
 
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+
+  @@index([status, endTime])
+  @@index([itemId])
+  @@index([sellerId])
 }
 
 // 💡 [신규/패치] 확장형 게시글 모델 (공지사항 포함)
@@ -123,6 +127,9 @@ model Bid {
   bidder      User     @relation(fields: [bidderId], references: [id])
 
   createdAt   DateTime @default(now())
+
+  @@index([auctionId, bidAmount(sort: Desc)])
+  @@index([bidderId])
 }
 
 model MarketVariable {
@@ -154,6 +161,8 @@ model MarketHistory {
   excludeReason      String?  @db.Text
 
   createdAt          DateTime @default(now())
+
+  @@index([itemId, isValid, tradeDate(sort: Desc)])
 }
 
 model Notification {
@@ -185,6 +194,10 @@ model ChatRoom {
   buyer        User     @relation("BuyerChatRooms", fields: [buyerId], references: [id])
   messages     Message[]
   reports      Report[]
+
+  @@index([sellerId, status])
+  @@index([buyerId, status])
+  @@index([auctionId])
 }
 
 model Message {
@@ -198,6 +211,9 @@ model Message {
   sender    User     @relation(fields: [senderId], references: [id])
 
   createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
+  @@index([roomId, isRead, senderId])
 }
 
 model Review {
@@ -213,6 +229,9 @@ model Review {
   reviewee    User     @relation("Reviewee", fields: [revieweeId], references: [id])
 
   createdAt   DateTime @default(now())
+
+  @@index([revieweeId])
+  @@index([auctionId, reviewerId])
 }
 
 model Report {
