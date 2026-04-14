@@ -26,6 +26,7 @@ router.get('/me', authenticateToken, async (req, res) => {
         loginId: true,
         ingameName: true,
         role: true,
+        isBanned: true,
         reputationScore: true,
         reviewCount: true,
         successfulTrades: true,
@@ -35,6 +36,10 @@ router.get('/me', authenticateToken, async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+    }
+
+    if (user.isBanned) {
+      return res.status(403).json({ error: "관리자에 의해 차단된 계정입니다." });
     }
 
     res.json(user);
@@ -111,6 +116,10 @@ router.post('/login', async (req, res) => {
 
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return res.status(401).json({ error: "아이디 또는 비밀번호가 잘못되었습니다." });
+    }
+
+    if (user.isBanned) {
+      return res.status(403).json({ error: "관리자에 의해 차단된 계정입니다. 접속할 수 없습니다." });
     }
 
     // 💡 페이로드 키를 'id'로 통일 (미들웨어와 호환성 확보)
