@@ -173,21 +173,6 @@ router.delete('/market/history/:id', async (req, res) => {
 // --- [관리 서비스 강화 패치] ---
 
 /**
- * [GET] 전체 유저 목록 조회
- */
-router.get('/users', async (req, res) => {
-  try {
-    const users = await prisma.user.findMany({
-      select: { id: true, loginId: true, ingameName: true, role: true, createdAt: true, reputationScore: true, successfulTrades: true },
-      orderBy: { id: 'asc' }
-    });
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: "유저 목록 로드 실패" });
-  }
-});
-
-/**
  * [GET] 모든 신고 내역 조회
  */
 router.get('/reports', async (req, res) => {
