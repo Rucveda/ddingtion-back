@@ -1,10 +1,8 @@
-// 1. 환경 변수(.env) 로드
-import 'dotenv/config';
-
 import pkg from 'pg';
 const { Pool } = pkg;
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
+import { env } from './config/env.js';
 
 /**
  * 💡 BigInt JSON 직렬화 패치
@@ -16,7 +14,7 @@ BigInt.prototype.toJSON = function() {
 
 // 2. PostgreSQL 커넥션 풀 설정
 const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL,
+  connectionString: env.DATABASE_URL,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
@@ -28,7 +26,7 @@ const adapter = new PrismaPg(pool);
 // 4. Prisma 클라이언트 생성
 const prisma = new PrismaClient({ 
   adapter,
-  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'], 
+  log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'], 
 });
 
 // 5. 데이터베이스 연결 테스트 로직

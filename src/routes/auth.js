@@ -3,9 +3,10 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
+import { env } from '../config/env.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'my_super_secret_key_123';
+const JWT_SECRET = env.JWT_SECRET;
 
 /**
  * [GET] /api/auth/me

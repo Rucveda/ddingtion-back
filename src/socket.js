@@ -1,16 +1,12 @@
 import prisma from './db.js';
-import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
+import { env } from './config/env.js';
+import { createRedisClient } from './lib/redis.js';
 
 const setupSocket = (io) => {
   // --- [Redis Pub/Sub 구독 설정 (워커 이벤트 수신용)] ---
-  const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-  const redisOptions = {
-    maxRetriesPerRequest: null,
-    ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
-  };
-  const subscriber = new Redis(redisUrl, redisOptions);
-  const redisConnection = new Redis(redisUrl, redisOptions); // 💡 상태 저장/조회용 일반 클라이언트 추가
+  const subscriber = createRedisClient();
+  const redisConnection = createRedisClient(); // 💡 상태 저장/조회용 일반 클라이언트 추가
   const AUCTION_EVENTS_CHANNEL = 'auction-events';
 
   subscriber.subscribe(AUCTION_EVENTS_CHANNEL, (err) => {
@@ -59,7 +55,7 @@ const setupSocket = (io) => {
         if (!token) throw new Error("인증 토큰이 누락되었습니다.");
         let decodedUser;
         try {
-            decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'my_super_secret_key_123');
+            decodedUser = jwt.verify(token, env.JWT_SECRET);
         } catch (err) {
             throw new Error("유효하지 않은 인증입니다.");
         }
@@ -157,7 +153,7 @@ const setupSocket = (io) => {
       try {
         const { roomId, token } = data;
         if (!token) throw new Error("인증 토큰 누락");
-        const decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'my_super_secret_key_123');
+        const decodedUser = jwt.verify(token, env.JWT_SECRET);
 
         const pRoomId = parseInt(roomId);
         const pUserId = parseInt(decodedUser.id);
@@ -185,7 +181,7 @@ const setupSocket = (io) => {
       try {
         const { roomId, token, content } = data;
         if (!token) throw new Error("인증 토큰 누락");
-        const decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'my_super_secret_key_123');
+        const decodedUser = jwt.verify(token, env.JWT_SECRET);
 
         const pRoomId = parseInt(roomId);
         const pSenderId = parseInt(decodedUser.id);

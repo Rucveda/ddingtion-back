@@ -1,16 +1,10 @@
-import 'dotenv/config';
 import { Worker } from 'bullmq';
-import Redis from 'ioredis';
 import prisma from '../db.js';
+import { createRedisClient } from '../lib/redis.js';
 
 // 💡 패치: 클라우드 Redis(Render, Upstash 등)를 위한 TLS 설정 및 퍼블리셔 추가
-const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const redisOptions = {
-  maxRetriesPerRequest: null,
-  ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
-};
-const redisConnection = new Redis(redisUrl, redisOptions);
-const publisher = new Redis(redisUrl, redisOptions);
+const redisConnection = createRedisClient();
+const publisher = createRedisClient();
 
 // 워커 생성
 const worker = new Worker('auctionQueue', async (job) => {

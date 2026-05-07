@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express from 'express';
 const router = express.Router();
 import multer from 'multer';
@@ -8,10 +7,11 @@ import authenticateToken from '../middlewares/authMiddleware.js';
 import prisma from '../db.js';
 import { createClient } from '@supabase/supabase-js'; // 추가
 import { Queue } from 'bullmq';
-import Redis from 'ioredis';
+import { env } from '../config/env.js';
+import { createRedisClient } from '../lib/redis.js';
 
 // ✅ Supabase 클라이언트 설정
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY);
 
 /**
  * 📂 [이미지 저장 설정 패치] 
@@ -27,11 +27,7 @@ const upload = multer({
 /**
  * 🛠️ [Redis 및 BullMQ 큐 설정]
  */
-const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const redisConnection = new Redis(redisUrl, {
-  maxRetriesPerRequest: null,
-  ...(redisUrl.includes('rediss://') ? { tls: { rejectUnauthorized: false } } : {})
-});
+const redisConnection = createRedisClient();
 const auctionQueue = new Queue('auctionQueue', { connection: redisConnection });
 
 /**

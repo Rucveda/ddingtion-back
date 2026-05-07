@@ -1,9 +1,9 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import prisma from './db.js';
+import { env } from './config/env.js';
 
 // [소켓 모듈 분리]
 import setupSocket from './socket.js';
@@ -28,7 +28,7 @@ const server = http.createServer(app);
  * 하드코딩된 프론트엔드 주소를 환경 변수(FRONTEND_URL)로 대체합니다.
  * 값이 없을 경우를 대비해 기본값도 유지합니다.
  */
-const FRONTEND_URL = process.env.FRONTEND_URL || "https://ddingtion-front.vercel.app";
+const FRONTEND_URL = env.FRONTEND_URL;
 
 // --- [Socket.io 설정] ---
 const io = new Server(server, {
@@ -73,7 +73,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/posts', postsRoutes); 
 
-const PORT = process.env.PORT || 8080;
+const PORT = Number(env.PORT);
 
 server.listen(PORT, '0.0.0.0', () => { 
   console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);
