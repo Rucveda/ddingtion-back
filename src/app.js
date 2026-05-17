@@ -3,7 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import prisma from './db.js';
-import { env } from './config/env.js';
+import { env, getDiscordConfigStatus } from './config/env.js';
 import { ensureRuntimeSchema } from './lib/runtimeSchema.js';
 
 // [소켓 모듈 분리]
@@ -73,6 +73,10 @@ const startServer = async () => {
     await prisma.$connect();
     console.log("✅ 데이터베이스(PostgreSQL) 연결 성공!");
     await ensureRuntimeSchema(prisma);
+    const discordConfig = getDiscordConfigStatus();
+    console.log(
+      `✅ Discord 인증 설정: ${discordConfig.enabled ? "활성" : "비활성"}${discordConfig.missing.length ? ` (누락: ${discordConfig.missing.join(", ")})` : ""}`,
+    );
 
     server.listen(PORT, '0.0.0.0', () => { 
       console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);

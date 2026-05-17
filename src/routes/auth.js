@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
-import { env, isDiscordVerificationEnforced } from '../config/env.js';
+import { env, getDiscordConfigStatus, isDiscordVerificationEnforced } from '../config/env.js';
 import {
   buildDiscordAuthorizeUrl,
   exchangeDiscordCode,
@@ -60,6 +60,7 @@ router.get('/me', authenticateToken, async (req, res) => {
       ...rest,
       discordLinked: Boolean(discordId),
       discordVerificationRequired: isDiscordVerificationEnforced(),
+      discordConfig: getDiscordConfigStatus(),
     });
   } catch (error) {
     console.error("내 정보 조회 오류:", error);
@@ -217,6 +218,7 @@ router.post('/register', async (req, res) => {
         role: newUser.role,
         discordLinked: false,
         discordVerificationRequired: isDiscordVerificationEnforced(),
+        discordConfig: getDiscordConfigStatus(),
       } 
     });
   } catch (error) {
@@ -277,6 +279,7 @@ router.post('/login', async (req, res) => {
         ...pub,
         discordLinked: Boolean(discordId),
         discordVerificationRequired: isDiscordVerificationEnforced(),
+        discordConfig: getDiscordConfigStatus(),
       } 
     });
   } catch (error) {

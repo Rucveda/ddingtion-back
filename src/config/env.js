@@ -2,10 +2,11 @@ import "dotenv/config";
 
 const readEnv = (key, { required = false, defaultValue } = {}) => {
   const value = process.env[key];
-  if ((value === undefined || value === "") && required) {
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if ((normalized === undefined || normalized === "") && required) {
     throw new Error(`[ENV] Missing required environment variable: ${key}`);
   }
-  return value ?? defaultValue;
+  return normalized || defaultValue;
 };
 
 export const env = {
@@ -32,3 +33,17 @@ export const isDiscordVerificationEnforced = () =>
       env.DISCORD_CLIENT_SECRET &&
       env.DISCORD_REDIRECT_URI
   );
+
+export const getDiscordConfigStatus = () => {
+  const requiredKeys = [
+    "DISCORD_CLIENT_ID",
+    "DISCORD_CLIENT_SECRET",
+    "DISCORD_REDIRECT_URI",
+  ];
+
+  return {
+    enabled: isDiscordVerificationEnforced(),
+    missing: requiredKeys.filter((key) => !env[key]),
+    guildCheckEnabled: Boolean(env.DISCORD_REQUIRED_GUILD_ID),
+  };
+};
