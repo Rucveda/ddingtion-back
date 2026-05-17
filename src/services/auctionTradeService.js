@@ -11,7 +11,7 @@ export class AuctionServiceError extends Error {
 export const createAuctionListing = async ({ userId, body, redisConnection, auctionQueue, clientIp }) => {
   await redisConnection.set(`user_ip:${userId}`, clientIp, "EX", 86400);
 
-  const { itemId, startPrice, buyNowPrice, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes } = body;
+  const { itemId, startPrice, buyNowPrice, durationDays, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes } = body;
 
   const parsedStartPrice = BigInt(startPrice);
   if (parsedStartPrice <= 0n) {
@@ -21,13 +21,15 @@ export const createAuctionListing = async ({ userId, body, redisConnection, auct
     throw new AuctionServiceError("즉시 구매가는 시작가보다 높아야 합니다.", 400);
   }
 
-  const parsedDurationHours = parseInt(durationHours) || 24;
-  if (parsedDurationHours <= 0 || parsedDurationHours > 168) {
-    throw new AuctionServiceError("경매 기간은 1~168시간(7일) 사이여야 합니다.", 400);
+  const parsedDurationDays = durationDays !== undefined
+    ? parseInt(durationDays)
+    : Math.ceil((parseInt(durationHours) || 24) / 24);
+  if (!Number.isInteger(parsedDurationDays) || parsedDurationDays <= 0 || parsedDurationDays > 7) {
+    throw new AuctionServiceError("경매 기간은 1~7일 사이여야 합니다.", 400);
   }
 
   const endTime = new Date();
-  endTime.setHours(endTime.getHours() + parsedDurationHours);
+  endTime.setDate(endTime.getDate() + parsedDurationDays);
 
   const newAuction = await prisma.auction.create({
     data: {
@@ -51,7 +53,7 @@ export const createAuctionListing = async ({ userId, body, redisConnection, auct
     "endAuction",
     { auctionId: newAuction.id },
     {
-      delay: parsedDurationHours * 3600000,
+      delay: parsedDurationDays * 24 * 3600000,
       jobId: `auction_${newAuction.id}`,
     },
   );
