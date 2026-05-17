@@ -36,6 +36,9 @@ model User {
   successfulTrades  Int      @default(0)
   preferences       Json?
 
+  // 💡 [추가] 디스코드 연동 기능 (고유 ID 저장용)
+  discordId         String?  @unique
+
   // 관계 설정
   auctions           Auction[]      @relation("SellerAuctions")
   bids               Bid[]

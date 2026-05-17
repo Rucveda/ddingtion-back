@@ -1,6 +1,6 @@
 import prisma from './db.js';
 import jwt from 'jsonwebtoken';
-import { env } from './config/env.js';
+import { env, isDiscordVerificationEnforced } from './config/env.js';
 import { createRedisClient } from './lib/redis.js';
 
 const setupSocket = (io) => {
@@ -61,6 +61,18 @@ const setupSocket = (io) => {
         }
         
         const parsedUserId = parseInt(decodedUser.id);
+
+        if (isDiscordVerificationEnforced()) {
+          const bidder = await prisma.user.findUnique({
+            where: { id: parsedUserId },
+            select: { discordId: true },
+          });
+          if (!bidder?.discordId) {
+            throw new Error(
+              "디스코드 인증이 필요합니다. 마이페이지에서 계정을 연동한 뒤 입찰할 수 있습니다.",
+            );
+          }
+        }
         
         // 💡 보안 패치: 유저의 최신 접속 IP를 Redis에 갱신 (1일 보관)
         await redisConnection.set(`user_ip:${parsedUserId}`, clientIp, 'EX', 86400);

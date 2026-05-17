@@ -9,6 +9,7 @@
     "dev": "nodemon src/app.js",
     "worker": "node src/workers/auctionWorker.js",
     "migrate": "npx prisma migrate dev",
+    "migrate:deploy": "npx prisma migrate deploy",
     "studio": "npx prisma studio",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

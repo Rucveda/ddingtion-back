@@ -3,10 +3,19 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
-import { env } from '../config/env.js';
+import { env, isDiscordVerificationEnforced } from '../config/env.js';
+import {
+  buildDiscordAuthorizeUrl,
+  exchangeDiscordCode,
+  fetchDiscordCurrentUser,
+  fetchAllDiscordGuilds,
+  assertUserInRequiredGuild,
+} from '../services/discordLinkService.js';
 
 const router = express.Router();
 const JWT_SECRET = env.JWT_SECRET;
+
+const frontendBase = () => env.FRONTEND_URL.replace(/\/$/, "");
 
 /**
  * [GET] /api/auth/me
@@ -14,7 +23,6 @@ const JWT_SECRET = env.JWT_SECRET;
  */
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    // 💡 패치: req.user.id가 확실한 숫자인지 보장 (Prisma undefined 에러 방지)
     const userId = parseInt(req.user.id);
     if (isNaN(userId)) {
       return res.status(400).json({ error: "유효하지 않은 유저 식별자입니다." });
@@ -31,8 +39,9 @@ router.get('/me', authenticateToken, async (req, res) => {
         reputationScore: true,
         reviewCount: true,
         successfulTrades: true,
-        createdAt: true
-      }
+        createdAt: true,
+        discordId: true,
+      },
     });
 
     if (!user) {
@@ -40,13 +49,126 @@ router.get('/me', authenticateToken, async (req, res) => {
     }
 
     if (user.isBanned) {
-      return res.status(403).json({ error: "관리자에 의해 차단된 계정입니다." });
+      return res.status(403).json({
+        code: "ACCOUNT_BANNED",
+        error: "관리자에 의해 차단된 계정입니다.",
+      });
     }
 
-    res.json(user);
+    const { discordId, ...rest } = user;
+    res.json({
+      ...rest,
+      discordLinked: Boolean(discordId),
+      discordVerificationRequired: isDiscordVerificationEnforced(),
+    });
   } catch (error) {
     console.error("내 정보 조회 오류:", error);
     res.status(500).json({ error: "계정 정보를 불러오지 못했습니다." });
+  }
+});
+
+/**
+ * [GET] /api/auth/discord/authorize
+ * 로그인한 사용자만 디스코드 OAuth 시작 URL을 받습니다.
+ */
+router.get('/discord/authorize', authenticateToken, async (req, res) => {
+  try {
+    if (!isDiscordVerificationEnforced()) {
+      return res.status(503).json({
+        error:
+          "디스코드 인증이 서버에서 설정되지 않았습니다. 관리자에게 문의하세요.",
+      });
+    }
+    if (req.user.discordId) {
+      return res.status(400).json({ error: "이미 디스코드 계정이 연동되어 있습니다." });
+    }
+
+    const state = jwt.sign(
+      { purpose: "discord_oauth", uid: req.user.id },
+      JWT_SECRET,
+      { expiresIn: "10m" },
+    );
+    const url = buildDiscordAuthorizeUrl(state);
+    res.json({ url });
+  } catch (error) {
+    console.error("Discord authorize:", error);
+    res.status(500).json({ error: error.message || "인증 URL 생성 실패" });
+  }
+});
+
+/**
+ * [GET] /api/auth/discord/callback
+ * Discord OAuth 리다이렉트 (공개)
+ */
+router.get('/discord/callback', async (req, res) => {
+  const fail = (reason) =>
+    res.redirect(
+      `${frontendBase()}/mypage?discord=error&reason=${encodeURIComponent(reason)}`,
+    );
+  const ok = () => res.redirect(`${frontendBase()}/mypage?discord=linked`);
+
+  try {
+    const { code, state } = req.query;
+    if (!code || !state || typeof code !== "string" || typeof state !== "string") {
+      return fail("missing_params");
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(state, JWT_SECRET);
+    } catch {
+      return fail("invalid_state");
+    }
+    if (payload.purpose !== "discord_oauth" || !payload.uid) {
+      return fail("invalid_state");
+    }
+
+    const userId = parseInt(payload.uid, 10);
+    if (isNaN(userId)) return fail("invalid_state");
+
+    const appUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!appUser || appUser.isBanned) {
+      return fail("forbidden");
+    }
+    if (appUser.discordId) {
+      return ok();
+    }
+
+    const tokenResponse = await exchangeDiscordCode(code);
+    const accessToken = tokenResponse.access_token;
+    const discordUser = await fetchDiscordCurrentUser(accessToken);
+    if (!discordUser.id) return fail("no_discord_user");
+
+    if (env.DISCORD_REQUIRED_GUILD_ID) {
+      const guilds = await fetchAllDiscordGuilds(accessToken);
+      try {
+        assertUserInRequiredGuild(guilds, env.DISCORD_REQUIRED_GUILD_ID);
+      } catch (e) {
+        if (e.message === "REQUIRED_GUILD_MISSING") return fail("guild");
+        throw e;
+      }
+    }
+
+    const discordId = String(discordUser.id);
+    const holder = await prisma.user.findUnique({ where: { discordId } });
+    if (holder && holder.id !== userId) {
+      return fail("in_use");
+    }
+
+    try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { discordId },
+      });
+    } catch (e) {
+      if (e.code === "P2002") return fail("in_use");
+      throw e;
+    }
+
+    return ok();
+  } catch (error) {
+    console.error("Discord callback:", error);
+    return fail("server");
   }
 });
 
@@ -62,7 +184,6 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: "모든 필드를 입력해주세요." });
     }
 
-    // 💡 패치: 입력값 공백 제거 (아이디/닉네임 앞뒤 공백으로 인한 로그인 실패 방지)
     loginId = loginId.trim();
     ingameName = ingameName.trim();
 
@@ -93,7 +214,9 @@ router.post('/register', async (req, res) => {
         id: newUser.id, 
         loginId: newUser.loginId, 
         ingameName: newUser.ingameName,
-        role: newUser.role
+        role: newUser.role,
+        discordLinked: false,
+        discordVerificationRequired: isDiscordVerificationEnforced(),
       } 
     });
   } catch (error) {
@@ -113,33 +236,47 @@ router.post('/login', async (req, res) => {
 
     loginId = loginId.trim();
 
-    const user = await prisma.user.findUnique({ where: { loginId } });
+    const user = await prisma.user.findUnique({
+      where: { loginId },
+      select: {
+        id: true,
+        loginId: true,
+        ingameName: true,
+        role: true,
+        passwordHash: true,
+        isBanned: true,
+        reputationScore: true,
+        reviewCount: true,
+        discordId: true,
+      },
+    });
 
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return res.status(401).json({ error: "아이디 또는 비밀번호가 잘못되었습니다." });
     }
 
     if (user.isBanned) {
-      return res.status(403).json({ error: "관리자에 의해 차단된 계정입니다. 접속할 수 없습니다." });
+      return res.status(403).json({
+        code: "ACCOUNT_BANNED",
+        error: "관리자에 의해 차단된 계정입니다. 접속할 수 없습니다.",
+      });
     }
 
-    // 💡 페이로드 키를 'id'로 통일 (미들웨어와 호환성 확보)
     const token = jwt.sign(
       { id: user.id, ingameName: user.ingameName, role: user.role }, 
       JWT_SECRET, 
       { expiresIn: '24h' }
     );
 
+    const { passwordHash: _ph, discordId, ...pub } = user;
+
     res.status(200).json({ 
       message: "로그인 성공", 
       token, 
       user: { 
-        id: user.id, 
-        loginId: user.loginId, 
-        ingameName: user.ingameName,
-        role: user.role,
-        reputationScore: user.reputationScore,
-        reviewCount: user.reviewCount
+        ...pub,
+        discordLinked: Boolean(discordId),
+        discordVerificationRequired: isDiscordVerificationEnforced(),
       } 
     });
   } catch (error) {

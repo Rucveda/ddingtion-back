@@ -1,5 +1,6 @@
 import express from 'express';
 import authenticateToken from '../middlewares/authMiddleware.js';
+import { checkDiscordLinked } from '../middlewares/discordCheck.js';
 import { Queue } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
 import { buildMarketAnalysis, parseMarketAnalysisOptions } from '../services/marketAnalysisService.js';
@@ -103,7 +104,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/:id/buy', authenticateToken, async (req, res) => {
+router.post('/:id/buy', authenticateToken, checkDiscordLinked, async (req, res) => {
     try {
         const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
         const auctionId = parseInt(req.params.id);

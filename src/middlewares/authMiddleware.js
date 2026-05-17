@@ -31,7 +31,8 @@ const authenticateToken = async (req, res, next) => {
       select: { 
         id: true, 
         role: true, 
-        ingameName: true 
+        ingameName: true,
+        discordId: true // 💡 디스코드 연동 여부 확인을 위해 추가
       }
     });
 
