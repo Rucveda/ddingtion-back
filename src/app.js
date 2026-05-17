@@ -4,6 +4,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import prisma from './db.js';
 import { env } from './config/env.js';
+import { ensureRuntimeSchema } from './lib/runtimeSchema.js';
 
 // [소켓 모듈 분리]
 import setupSocket from './socket.js';
@@ -56,14 +57,6 @@ app.use(cors({
 
 app.use(express.json());
 
-// DB 연결 확인
-prisma.$connect()
-  .then(() => console.log("✅ 데이터베이스(PostgreSQL) 연결 성공!"))
-  .catch((err) => {
-    console.error("❌ DB 연결 실패:", err);
-    process.exit(1); 
-  });
-
 // --- [라우터 등록] ---
 app.use('/api/auth', authRoutes);      
 app.use('/api/auctions', auctionRoutes); 
@@ -75,6 +68,19 @@ app.use('/api/posts', postsRoutes);
 
 const PORT = Number(env.PORT);
 
-server.listen(PORT, '0.0.0.0', () => { 
-  console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);
-});
+const startServer = async () => {
+  try {
+    await prisma.$connect();
+    console.log("✅ 데이터베이스(PostgreSQL) 연결 성공!");
+    await ensureRuntimeSchema(prisma);
+
+    server.listen(PORT, '0.0.0.0', () => { 
+      console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ DB 연결 또는 런타임 스키마 확인 실패:", err);
+    process.exit(1); 
+  }
+};
+
+startServer();
