@@ -31,9 +31,9 @@ const worker = new Worker('auctionQueue', async (job) => {
         // 💡 입찰자 없이 종료된 경우
         await prisma.auction.update({
           where: { id: auctionId },
-          data: { status: 'CANCELED' } // 💡 수정: 상태 문자열 통일
+          data: { status: 'EXPIRED' }
         });
-        console.log(`[경매 ${auctionId}] 입찰자 없음 - 유찰 처리`);
+        console.log(`[경매 ${auctionId}] 입찰자 없음 - 만료/유찰 처리`);
       } else {
         // 💡 낙찰자가 있는 경우 (트랜잭션)
         await prisma.$transaction([

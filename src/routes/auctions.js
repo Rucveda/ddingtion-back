@@ -5,7 +5,7 @@ import { Queue } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
 import prisma from '../db.js';
 import { buildMarketAnalysis, parseMarketAnalysisOptions } from '../services/marketAnalysisService.js';
-import { AuctionServiceError, buyNowAuction, createAuctionListing } from '../services/auctionTradeService.js';
+import { AuctionServiceError, buyNowAuction, createAuctionListing, relistAuction } from '../services/auctionTradeService.js';
 import { getActiveAuctions, getAuctionDetail, getAuctionItems, getCompletedHistory, getUserAuctions, getUserBidAuctions } from '../services/auctionQueryService.js';
 
 const router = express.Router();
@@ -209,6 +209,35 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(error.status).json({ error: error.message });
         }
         res.status(500).json({ error: "등록 실패" });
+    }
+});
+
+router.post('/:id/relist', authenticateToken, async (req, res) => {
+    try {
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+        const auctionId = parseInt(req.params.id);
+        if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
+
+        const newAuction = await relistAuction({
+            auctionId,
+            userId: req.user.id,
+            body: req.body,
+            redisConnection,
+            auctionQueue,
+            clientIp,
+        });
+        res.status(201).json({
+            ...newAuction,
+            id: newAuction.id.toString(),
+            startPrice: newAuction.startPrice.toString(),
+            currentPrice: newAuction.currentPrice.toString(),
+        });
+    } catch (error) {
+        if (error instanceof AuctionServiceError) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error("Relist Error:", error);
+        res.status(500).json({ error: "재등록 실패" });
     }
 });
 

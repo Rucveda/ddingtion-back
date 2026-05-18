@@ -11,7 +11,7 @@ export class AuctionServiceError extends Error {
 export const createAuctionListing = async ({ userId, body, redisConnection, auctionQueue, clientIp }) => {
   await redisConnection.set(`user_ip:${userId}`, clientIp, "EX", 86400);
 
-  const { itemId, startPrice, buyNowPrice, durationDays, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes } = body;
+  const { itemId, startPrice, buyNowPrice, durationDays, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes, description } = body;
 
   const parsedStartPrice = BigInt(startPrice);
   if (parsedStartPrice <= 0n) {
@@ -40,6 +40,7 @@ export const createAuctionListing = async ({ userId, body, redisConnection, auct
       buyNowPrice: buyNowPrice ? BigInt(buyNowPrice) : null,
       endTime,
       status: "ACTIVE",
+      description: description ? String(description).slice(0, 500) : null,
       enhancementLevel: parseInt(enhancementLevel) || 0,
       enhancementRank,
       enchantments,
@@ -59,6 +60,49 @@ export const createAuctionListing = async ({ userId, body, redisConnection, auct
   );
 
   return newAuction;
+};
+
+export const relistAuction = async ({ auctionId, userId, body, redisConnection, auctionQueue, clientIp }) => {
+  const sourceAuction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    include: {
+      bids: { select: { id: true }, take: 1 },
+    },
+  });
+
+  if (!sourceAuction) {
+    throw new AuctionServiceError("재등록할 경매를 찾을 수 없습니다.", 404);
+  }
+  if (sourceAuction.sellerId !== userId) {
+    throw new AuctionServiceError("본인이 등록한 경매만 다시 등록할 수 있습니다.", 403);
+  }
+  if (!["EXPIRED", "CANCELED"].includes(sourceAuction.status)) {
+    throw new AuctionServiceError("만료되었거나 유찰된 경매만 다시 등록할 수 있습니다.", 400);
+  }
+  if (sourceAuction.bids.length > 0) {
+    throw new AuctionServiceError("입찰 기록이 있는 경매는 다시 등록할 수 없습니다.", 400);
+  }
+
+  return createAuctionListing({
+    userId,
+    redisConnection,
+    auctionQueue,
+    clientIp,
+    body: {
+      itemId: sourceAuction.itemId,
+      startPrice: sourceAuction.startPrice.toString(),
+      buyNowPrice: sourceAuction.buyNowPrice?.toString() || null,
+      durationDays: "1",
+      enhancementLevel: sourceAuction.enhancementLevel,
+      enhancementRank: sourceAuction.enhancementRank,
+      enchantments: sourceAuction.enchantments,
+      imprints: sourceAuction.imprint,
+      skills: sourceAuction.skills,
+      runes: sourceAuction.runes,
+      description: sourceAuction.description,
+      ...body,
+    },
+  });
 };
 
 export const buyNowAuction = async ({ auctionId, user, redisConnection, auctionQueue, clientIp }) => {
