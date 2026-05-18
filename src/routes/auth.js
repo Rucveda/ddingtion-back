@@ -16,6 +16,34 @@ const router = express.Router();
 const JWT_SECRET = env.JWT_SECRET;
 
 const frontendBase = () => env.FRONTEND_URL.replace(/\/$/, "");
+const minecraftNamePattern = /^[A-Za-z0-9_]{3,16}$/;
+const roleForDiscordVerifiedUser = (role = "USER") => {
+  const normalized = role.toUpperCase();
+  return normalized === "USER" ? "WRITER" : normalized;
+};
+
+const publicUserSelect = {
+  id: true,
+  loginId: true,
+  ingameName: true,
+  role: true,
+  isBanned: true,
+  reputationScore: true,
+  reviewCount: true,
+  successfulTrades: true,
+  createdAt: true,
+  discordId: true,
+};
+
+const toPublicUser = (user) => {
+  const { discordId, ...rest } = user;
+  return {
+    ...rest,
+    discordLinked: Boolean(discordId),
+    discordVerificationRequired: isDiscordVerificationEnforced(),
+    discordConfig: getDiscordConfigStatus(),
+  };
+};
 
 /**
  * [GET] /api/auth/me
@@ -98,6 +126,42 @@ router.get('/discord/authorize', authenticateToken, async (req, res) => {
 });
 
 /**
+ * [POST] /api/auth/password-reset/discord/authorize
+ * Discord OAuth로 계정 소유를 확인한 뒤 비밀번호 재설정을 시작합니다.
+ */
+router.post('/password-reset/discord/authorize', async (req, res) => {
+  try {
+    if (!isDiscordVerificationEnforced()) {
+      return res.status(503).json({ error: "디스코드 인증이 서버에서 설정되지 않았습니다." });
+    }
+
+    const loginId = String(req.body?.loginId || "").trim();
+    if (!loginId) {
+      return res.status(400).json({ error: "마인크래프트 닉네임을 입력해주세요." });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { loginId },
+      select: { id: true, isBanned: true, discordId: true },
+    });
+
+    if (!user || user.isBanned || !user.discordId) {
+      return res.status(400).json({ error: "Discord 인증으로 재설정할 수 없는 계정입니다." });
+    }
+
+    const state = jwt.sign(
+      { purpose: "password_reset", uid: user.id },
+      JWT_SECRET,
+      { expiresIn: "10m" },
+    );
+    res.json({ url: buildDiscordAuthorizeUrl(state) });
+  } catch (error) {
+    console.error("Password reset authorize:", error);
+    res.status(500).json({ error: error.message || "비밀번호 재설정 인증 시작 실패" });
+  }
+});
+
+/**
  * [GET] /api/auth/discord/callback
  * Discord OAuth 리다이렉트 (공개)
  */
@@ -107,6 +171,8 @@ router.get('/discord/callback', async (req, res) => {
       `${frontendBase()}/mypage?discord=error&reason=${encodeURIComponent(reason)}`,
     );
   const ok = () => res.redirect(`${frontendBase()}/mypage?discord=linked`);
+  const resetOk = (token) =>
+    res.redirect(`${frontendBase()}/reset-password?token=${encodeURIComponent(token)}`);
 
   try {
     const { code, state } = req.query;
@@ -120,7 +186,7 @@ router.get('/discord/callback', async (req, res) => {
     } catch {
       return fail("invalid_state");
     }
-    if (payload.purpose !== "discord_oauth" || !payload.uid) {
+    if (!["discord_oauth", "password_reset"].includes(payload.purpose) || !payload.uid) {
       return fail("invalid_state");
     }
 
@@ -131,7 +197,13 @@ router.get('/discord/callback', async (req, res) => {
     if (!appUser || appUser.isBanned) {
       return fail("forbidden");
     }
-    if (appUser.discordId) {
+    if (payload.purpose === "discord_oauth" && appUser.discordId) {
+      if (appUser.role?.toUpperCase() === "USER") {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { role: "WRITER" },
+        });
+      }
       return ok();
     }
 
@@ -151,15 +223,31 @@ router.get('/discord/callback', async (req, res) => {
     }
 
     const discordId = String(discordUser.id);
+    if (payload.purpose === "password_reset") {
+      if (!appUser.discordId || appUser.discordId !== discordId) {
+        return fail("reset_discord_mismatch");
+      }
+      const resetToken = jwt.sign(
+        { purpose: "password_reset_confirm", uid: appUser.id },
+        JWT_SECRET,
+        { expiresIn: "15m" },
+      );
+      return resetOk(resetToken);
+    }
+
     const holder = await prisma.user.findUnique({ where: { discordId } });
     if (holder && holder.id !== userId) {
+      if (holder.isBanned) return fail("in_use_banned");
       return fail("in_use");
     }
 
     try {
       await prisma.user.update({
         where: { id: userId },
-        data: { discordId },
+        data: {
+          discordId,
+          role: roleForDiscordVerifiedUser(appUser.role),
+        },
       });
     } catch (e) {
       if (e.code === "P2002") return fail("in_use");
@@ -228,6 +316,101 @@ router.post('/register', async (req, res) => {
 });
 
 /**
+ * [POST] /api/auth/password-reset/confirm
+ * Discord OAuth로 발급된 reset token으로 새 비밀번호를 저장합니다.
+ */
+router.post('/password-reset/confirm', async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    if (!token || !password) {
+      return res.status(400).json({ error: "재설정 토큰과 새 비밀번호를 입력해주세요." });
+    }
+    if (String(password).length < 4) {
+      return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다." });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch {
+      return res.status(400).json({ error: "재설정 링크가 만료되었습니다. 다시 시도해 주세요." });
+    }
+
+    if (payload.purpose !== "password_reset_confirm" || !payload.uid) {
+      return res.status(400).json({ error: "유효하지 않은 재설정 토큰입니다." });
+    }
+
+    const userId = parseInt(payload.uid, 10);
+    if (isNaN(userId)) return res.status(400).json({ error: "유효하지 않은 계정 정보입니다." });
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isBanned: true },
+    });
+    if (!user || user.isBanned) {
+      return res.status(403).json({ error: "비밀번호를 재설정할 수 없는 계정입니다." });
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    res.json({ message: "비밀번호가 재설정되었습니다." });
+  } catch (error) {
+    console.error("Password reset confirm:", error);
+    res.status(500).json({ error: "비밀번호 재설정 실패" });
+  }
+});
+
+/**
+ * [PATCH] /api/auth/me/minecraft-name
+ * 로그인 ID와 표시 닉네임을 Minecraft 닉네임 기준으로 함께 변경합니다.
+ */
+router.patch('/me/minecraft-name', authenticateToken, async (req, res) => {
+  try {
+    const minecraftName = String(req.body?.minecraftName || "").trim();
+    if (!minecraftNamePattern.test(minecraftName)) {
+      return res.status(400).json({ error: "마인크래프트 닉네임은 영문, 숫자, _ 조합의 3~16자여야 합니다." });
+    }
+
+    const userId = parseInt(req.user.id, 10);
+    if (isNaN(userId)) return res.status(400).json({ error: "유효하지 않은 유저 식별자입니다." });
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isBanned: true },
+    });
+    if (!currentUser || currentUser.isBanned) {
+      return res.status(403).json({ error: "차단된 계정은 정보를 변경할 수 없습니다." });
+    }
+
+    const existing = await prisma.user.findFirst({
+      where: {
+        id: { not: userId },
+        OR: [{ loginId: minecraftName }, { ingameName: minecraftName }],
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      return res.status(409).json({ error: "이미 사용 중인 마인크래프트 닉네임입니다." });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { loginId: minecraftName, ingameName: minecraftName },
+      select: publicUserSelect,
+    });
+
+    res.json(toPublicUser(updated));
+  } catch (error) {
+    console.error("Minecraft name update:", error);
+    res.status(500).json({ error: "마인크래프트 닉네임 변경 실패" });
+  }
+});
+
+/**
  * [POST] /api/auth/login
  * 로그인
  */
@@ -262,6 +445,14 @@ router.post('/login', async (req, res) => {
         code: "ACCOUNT_BANNED",
         error: "관리자에 의해 차단된 계정입니다. 접속할 수 없습니다.",
       });
+    }
+
+    if (user.discordId && user.role?.toUpperCase() === "USER") {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { role: "WRITER" },
+      });
+      user.role = "WRITER";
     }
 
     const token = jwt.sign(

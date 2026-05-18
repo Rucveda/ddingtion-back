@@ -11,5 +11,13 @@ export const ensureRuntimeSchema = async (prisma) => {
     CREATE UNIQUE INDEX IF NOT EXISTS "User_discordId_key" ON "User"("discordId");
   `);
 
-  console.log("✅ 런타임 DB 스키마 확인 완료: User.discordId");
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'GENERAL';
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Post_category_idx" ON "Post"("category");
+  `);
+
+  console.log("✅ 런타임 DB 스키마 확인 완료: User.discordId, Post.category");
 };

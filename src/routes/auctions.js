@@ -9,6 +9,14 @@ import { AuctionServiceError, buyNowAuction, createAuctionListing } from '../ser
 import { getActiveAuctions, getAuctionDetail, getAuctionItems, getCompletedHistory, getUserAuctions, getUserBidAuctions } from '../services/auctionQueryService.js';
 
 const router = express.Router();
+const MARKET_ANALYSIS_CACHE_TTL_MS = 60 * 1000;
+const marketAnalysisCache = new Map();
+
+const getStableQueryKey = (query) =>
+    Object.keys(query)
+        .sort()
+        .map((key) => `${key}:${query[key]}`)
+        .join('|');
 
 /**
  * 🛠️ [Redis 연결]
@@ -32,8 +40,26 @@ router.get('/market-analysis/:itemId', async (req, res) => {
     try {
         const itemId = parseInt(req.params.itemId);
         if (isNaN(itemId)) return res.status(400).json({ error: "유효하지 않은 아이템 ID" });
+        const bypassCache = req.query.fresh === "1" || req.query.noCache === "1";
+        const cacheTtlMs = req.query.cacheTtl === "4" ? 4 * 1000 : MARKET_ANALYSIS_CACHE_TTL_MS;
+        const cacheMaxAge = Math.max(0, Math.floor(cacheTtlMs / 1000));
+        const cacheKey = `${itemId}:${getStableQueryKey(req.query)}`;
+        const cached = marketAnalysisCache.get(cacheKey);
+        if (!bypassCache && cached && Date.now() - cached.createdAt < cacheTtlMs) {
+            res.set('Cache-Control', `private, max-age=${cacheMaxAge}`);
+            return res.json(cached.analysis);
+        }
+
         const parsedOptions = parseMarketAnalysisOptions(req.query);
         const analysis = await buildMarketAnalysis(itemId, parsedOptions);
+        if (!bypassCache) {
+            marketAnalysisCache.set(cacheKey, { analysis, createdAt: Date.now() });
+            if (marketAnalysisCache.size > 300) {
+                const oldestKey = marketAnalysisCache.keys().next().value;
+                marketAnalysisCache.delete(oldestKey);
+            }
+        }
+        res.set('Cache-Control', bypassCache ? 'no-store' : `private, max-age=${cacheMaxAge}`);
         res.json(analysis);
     } catch (error) {
         res.status(500).json({ error: "분석 생성 실패" });

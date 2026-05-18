@@ -3,12 +3,18 @@ const router = express.Router();
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
 
+const POST_CATEGORIES = new Set(['GENERAL', 'WILD', 'ISLAND', 'RPG', 'TRADE', 'QUESTION']);
+const normalizePostCategory = (category) => {
+  const normalized = String(category || 'GENERAL').trim().toUpperCase();
+  return POST_CATEGORIES.has(normalized) ? normalized : 'GENERAL';
+};
+
 /**
  * 글 목록 조회
  */
 router.get('/', async (req, res) => {
   try {
-    const { type } = req.query;
+    const { type, category } = req.query;
     let whereClause = {};
     
     // 공지사항인지 확인
@@ -16,6 +22,9 @@ router.get('/', async (req, res) => {
 
     if (type) {
       whereClause.type = type.toUpperCase(); 
+    }
+    if (category && String(category).toUpperCase() !== 'ALL') {
+      whereClause.category = normalizePostCategory(category);
     }
 
     const posts = await prisma.post.findMany({
@@ -42,7 +51,7 @@ router.get('/', async (req, res) => {
  */
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, content, type = "GENERAL" } = req.body;
+    const { title, content, type = "GENERAL", category = "GENERAL" } = req.body;
     const userRole = req.user.role ? req.user.role.toUpperCase() : 'USER';
     const postType = type.toUpperCase();
 
@@ -51,7 +60,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const allowedRoles = ['ADMIN', 'WRITER'];
-    if (postType === 'GENERAL' && !allowedRoles.includes(userRole)) {
+    if (postType === 'GENERAL' && !allowedRoles.includes(userRole) && !req.user.discordId) {
       return res.status(403).json({ error: "게시글 작성 권한이 없습니다." });
     }
 
@@ -64,6 +73,7 @@ router.post('/', authenticateToken, async (req, res) => {
         title,
         content,
         type: postType,
+        category: postType === 'GENERAL' ? normalizePostCategory(category) : 'NOTICE',
         authorId: req.user.id
       }
     });

@@ -206,12 +206,18 @@ const calculateRPGSkillCost = (weaponName, skills, getV) => {
   return totalSkillCost;
 };
 
-const getFairPrice = async (itemId, options) => {
-  const item = await prisma.item.findUnique({ where: { id: itemId } });
+const getFairPrice = async (itemId, options, context = {}) => {
+  if (!context.item) {
+    context.item = await prisma.item.findUnique({ where: { id: itemId } });
+  }
+  const item = context.item;
   if (!item) return 0n;
 
-  const vars = await prisma.marketVariable.findMany();
-  const getV = (key) => vars.find((v) => v.key === key)?.value || 0;
+  if (!context.varMap) {
+    const vars = await prisma.marketVariable.findMany();
+    context.varMap = new Map(vars.map((v) => [v.key, v.value]));
+  }
+  const getV = (key) => context.varMap.get(key) || 0;
 
   let buildCost = 0;
   const category = item.category.toUpperCase();
@@ -271,7 +277,7 @@ const getFairPrice = async (itemId, options) => {
   return BigInt(Math.round(buildCost));
 };
 
-const getInferredPrice = async (itemId, targetOptions) => {
+const getInferredPrice = async (itemId, targetOptions, context = {}) => {
   const similarTrades = await prisma.marketHistory.findMany({
     where: { itemId, isValid: true },
     orderBy: { tradeDate: "desc" },
@@ -280,8 +286,8 @@ const getInferredPrice = async (itemId, targetOptions) => {
   if (similarTrades.length === 0) return null;
 
   const baseTrade = similarTrades[0];
-  const targetCost = Number(await getFairPrice(itemId, targetOptions));
-  const baseCost = Number(await getFairPrice(itemId, baseTrade));
+  const targetCost = Number(await getFairPrice(itemId, targetOptions, context));
+  const baseCost = Number(await getFairPrice(itemId, baseTrade, context));
   const inferred = Number(baseTrade.price) + (targetCost - baseCost);
 
   return BigInt(Math.max(0, Math.round(inferred)));
@@ -300,8 +306,9 @@ export const parseMarketAnalysisOptions = (query) => {
 };
 
 export const buildMarketAnalysis = async (itemId, parsedOptions) => {
-  let fairPrice = await getInferredPrice(itemId, parsedOptions);
-  if (fairPrice === null) fairPrice = await getFairPrice(itemId, parsedOptions);
+  const context = {};
+  let fairPrice = await getInferredPrice(itemId, parsedOptions, context);
+  if (fairPrice === null) fairPrice = await getFairPrice(itemId, parsedOptions, context);
 
   const history = await prisma.marketHistory.findMany({
     where: { itemId, isValid: true },

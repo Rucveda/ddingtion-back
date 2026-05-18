@@ -9,6 +9,7 @@ import { createClient } from '@supabase/supabase-js'; // 추가
 import { Queue } from 'bullmq';
 import { env } from '../config/env.js';
 import { createRedisClient } from '../lib/redis.js';
+import bcrypt from 'bcrypt';
 
 // ✅ Supabase 클라이언트 설정
 const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY);
@@ -29,6 +30,27 @@ const upload = multer({
  */
 const redisConnection = createRedisClient();
 const auctionQueue = new Queue('auctionQueue', { connection: redisConnection });
+
+const getPagination = (query, defaultLimit = 30, maxLimit = 100) => {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const requestedLimit = parseInt(query.limit, 10) || defaultLimit;
+  const limit = Math.min(maxLimit, Math.max(1, requestedLimit));
+  return {
+    page,
+    limit,
+    skip: (page - 1) * limit,
+  };
+};
+
+const paginatedResponse = ({ items, total, page, limit }) => ({
+  items,
+  pagination: {
+    page,
+    limit,
+    total,
+    hasMore: page * limit < total,
+  },
+});
 
 /**
  * 👑 관리자 권한 확인 미들웨어
@@ -81,16 +103,21 @@ router.post('/market/variables', async (req, res) => {
  */
 router.get('/market/history', async (req, res) => {
   try {
-    const history = await prisma.marketHistory.findMany({
-      include: { item: { select: { name: true, category: true } } },
-      orderBy: { tradeDate: 'desc' },
-      take: 200 
-    });
+    const { page, limit, skip } = getPagination(req.query, 30, 100);
+    const [history, total] = await Promise.all([
+      prisma.marketHistory.findMany({
+        include: { item: { select: { name: true, category: true } } },
+        orderBy: { tradeDate: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.marketHistory.count(),
+    ]);
     const safeHistory = history.map(h => ({
       ...h,
       price: h.price.toString()
     }));
-    res.json(safeHistory);
+    res.json(paginatedResponse({ items: safeHistory, total, page, limit }));
   } catch (error) {
     res.status(500).json({ error: "거래 이력 로드 실패" });
   }
@@ -173,15 +200,21 @@ router.delete('/market/history/:id', async (req, res) => {
  */
 router.get('/reports', async (req, res) => {
   try {
-    const reports = await prisma.report.findMany({
-      include: {
-        reporter: { select: { id: true, ingameName: true } },
-        target: { select: { id: true, ingameName: true } },
-        room: { select: { id: true, status: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(reports);
+    const { page, limit, skip } = getPagination(req.query, 20, 100);
+    const [reports, total] = await Promise.all([
+      prisma.report.findMany({
+        include: {
+          reporter: { select: { id: true, ingameName: true } },
+          target: { select: { id: true, ingameName: true } },
+          room: { select: { id: true, status: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.report.count(),
+    ]);
+    res.json(paginatedResponse({ items: reports, total, page, limit }));
   } catch (error) {
     res.status(500).json({ error: "신고 내역 로드 실패" });
   }
@@ -408,7 +441,8 @@ router.patch('/users/:id/ban', async (req, res) => {
 
     res.json({ 
       message: isBanned ? "사용자가 차단되었습니다." : "사용자 차단이 해제되었습니다.",
-      isBanned: user.isBanned 
+      isBanned: user.isBanned,
+      discordLinked: Boolean(user.discordId),
     });
   } catch (error) {
     console.error("Ban Error:", error);
@@ -417,24 +451,100 @@ router.patch('/users/:id/ban', async (req, res) => {
 });
 
 /**
+ * [PATCH] 오류 계정 익명화
+ * 외래키가 얽힌 거래 기록은 보존하고, 로그인/닉네임/Discord 식별만 제거합니다.
+ */
+router.patch('/users/:id/anonymize', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: "유효하지 않은 유저 ID입니다." });
+    }
+
+    if (req.user?.id && parseInt(req.user.id, 10) === userId) {
+      return res.status(400).json({ error: "현재 로그인한 관리자 계정은 익명화할 수 없습니다." });
+    }
+
+    const anonymizedName = `deleted_user_${userId}`;
+    const passwordHash = await bcrypt.hash(`deleted:${userId}:${Date.now()}:${Math.random()}`, 10);
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        loginId: anonymizedName,
+        ingameName: anonymizedName,
+        passwordHash,
+        discordId: null,
+        isBanned: true,
+        role: "USER",
+      },
+      select: {
+        id: true,
+        loginId: true,
+        ingameName: true,
+        isBanned: true,
+        discordId: true,
+      },
+    });
+
+    res.json({
+      message: "계정이 익명화되었습니다. 기존 거래 기록은 보존됩니다.",
+      user: {
+        ...user,
+        discordLinked: Boolean(user.discordId),
+      },
+    });
+  } catch (error) {
+    console.error("User Anonymize Error:", error);
+    if (error.code === "P2025") {
+      return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+    }
+    res.status(500).json({ error: "계정 익명화 실패" });
+  }
+});
+
+/**
  * 🔍 [GET] 전체 유저 목록 조회 (밴 상태 포함)
  */
 router.get('/users', async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
-      select: { 
-        id: true, 
-        loginId: true, 
-        ingameName: true, 
-        role: true, 
-        isBanned: true, // 💡 밴 상태 추가
-        createdAt: true, 
-        reputationScore: true, 
-        successfulTrades: true 
-      },
-      orderBy: { id: 'asc' }
-    });
-    res.json(users);
+    const { page, limit, skip } = getPagination(req.query, 30, 100);
+    const q = String(req.query.q || "").trim();
+    const numericQuery = /^\d+$/.test(q) ? parseInt(q, 10) : null;
+    const where = q
+      ? {
+          OR: [
+            ...(numericQuery !== null ? [{ id: numericQuery }] : []),
+            { loginId: { contains: q, mode: 'insensitive' } },
+            { ingameName: { contains: q, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: { 
+          id: true, 
+          loginId: true, 
+          ingameName: true, 
+          role: true, 
+          isBanned: true, // 💡 밴 상태 추가
+          createdAt: true, 
+          reputationScore: true, 
+          successfulTrades: true,
+          discordId: true,
+        },
+        orderBy: { id: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.user.count({ where }),
+    ]);
+    const safeUsers = users.map(({ discordId, ...user }) => ({
+      ...user,
+      discordLinked: Boolean(discordId),
+    }));
+    res.json(paginatedResponse({ items: safeUsers, total, page, limit }));
   } catch (error) {
     res.status(500).json({ error: "유저 목록 로드 실패" });
   }

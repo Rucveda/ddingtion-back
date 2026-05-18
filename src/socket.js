@@ -94,8 +94,10 @@ const setupSocket = (io) => {
           if (!auction || auction.status !== 'ACTIVE') {
             throw new Error("이미 종료되었거나 무효한 경매입니다.");
           }
-          if (parsedBidAmount <= BigInt(auction.currentPrice)) {
-            throw new Error("입찰가가 현재가보다 낮습니다.");
+          const currentPrice = BigInt(auction.currentPrice);
+          const minimumBid = currentPrice + ((currentPrice + 9n) / 10n);
+          if (parsedBidAmount < minimumBid) {
+            throw new Error(`최소 입찰가는 ${minimumBid.toString()}G 입니다.`);
           }
           if (auction.buyNowPrice && parsedBidAmount >= BigInt(auction.buyNowPrice)) {
             throw new Error("즉시 구매가 이상의 금액은 입찰할 수 없습니다. 즉시 구매 기능을 이용해주세요.");
