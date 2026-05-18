@@ -3,9 +3,10 @@ import authenticateToken from '../middlewares/authMiddleware.js';
 import { checkDiscordLinked } from '../middlewares/discordCheck.js';
 import { Queue } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
+import prisma from '../db.js';
 import { buildMarketAnalysis, parseMarketAnalysisOptions } from '../services/marketAnalysisService.js';
 import { AuctionServiceError, buyNowAuction, createAuctionListing } from '../services/auctionTradeService.js';
-import { getActiveAuctions, getAuctionDetail, getAuctionItems, getCompletedHistory } from '../services/auctionQueryService.js';
+import { getActiveAuctions, getAuctionDetail, getAuctionItems, getCompletedHistory, getUserAuctions, getUserBidAuctions } from '../services/auctionQueryService.js';
 
 const router = express.Router();
 
@@ -62,6 +63,87 @@ router.get('/', async (req, res) => {
         res.status(200).json(Array.isArray(safeData) ? safeData : []);
     } catch (error) {
         res.status(200).json([]);
+    }
+});
+
+router.get('/my-bids', authenticateToken, async (req, res) => {
+    try {
+        const safeData = await getUserBidAuctions(req.user.id);
+        res.status(200).json(Array.isArray(safeData) ? safeData : []);
+    } catch (error) {
+        console.error(error);
+        res.status(200).json([]);
+    }
+});
+
+router.get('/my-auctions', authenticateToken, async (req, res) => {
+    try {
+        const safeData = await getUserAuctions(req.user.id);
+        res.status(200).json(Array.isArray(safeData) ? safeData : []);
+    } catch (error) {
+        console.error(error);
+        res.status(200).json([]);
+    }
+});
+
+router.get('/:id/comments', async (req, res) => {
+    try {
+        const auctionId = parseInt(req.params.id);
+        if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
+
+        const comments = await prisma.auctionComment.findMany({
+            where: { auctionId },
+            orderBy: { createdAt: 'asc' },
+            take: 100,
+            include: {
+                author: { select: { id: true, ingameName: true, reputationScore: true } }
+            }
+        });
+
+        res.json(comments);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json([]);
+    }
+});
+
+router.post('/:id/comments', authenticateToken, async (req, res) => {
+    try {
+        const auctionId = parseInt(req.params.id);
+        const content = String(req.body?.content || "").trim();
+
+        if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
+        if (!content) return res.status(400).json({ error: "댓글 내용을 입력해주세요." });
+        if (content.length > 500) return res.status(400).json({ error: "댓글은 500자 이하로 입력해주세요." });
+
+        const auction = await prisma.auction.findUnique({
+            where: { id: auctionId },
+            select: { id: true, sellerId: true, item: { select: { name: true } } }
+        });
+        if (!auction) return res.status(404).json({ error: "경매 없음" });
+
+        const comment = await prisma.auctionComment.create({
+            data: { auctionId, authorId: req.user.id, content },
+            include: {
+                author: { select: { id: true, ingameName: true, reputationScore: true } }
+            }
+        });
+
+        if (auction.sellerId !== req.user.id) {
+            await prisma.notification.create({
+                data: {
+                    userId: auction.sellerId,
+                    type: "COMMENT",
+                    message: `[${auction.item.name}] 경매에 새 댓글이 등록되었습니다.`,
+                    link: `/auction/${auctionId}`
+                }
+            });
+        }
+
+        res.status(201).json(comment);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "댓글 등록 실패" });
     }
 });
 

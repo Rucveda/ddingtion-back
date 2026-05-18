@@ -31,10 +31,20 @@ router.post('/', authenticateToken, async (req, res) => {
 
       // 💡 보안 패치: 해당 거래의 실제 참여자(판매자 또는 구매자)인지 채팅방 내역으로 교차 검증
       const room = await tx.chatRoom.findFirst({
-        where: { auctionId: parsedAuctionId, OR: [{ sellerId: reviewerId }, { buyerId: reviewerId }] }
+        where: {
+          auctionId: parsedAuctionId,
+          status: "ARCHIVED",
+          sellerConfirmed: true,
+          buyerConfirmed: true,
+          OR: [{ sellerId: reviewerId }, { buyerId: reviewerId }]
+        },
+        include: { auction: { select: { status: true } } }
       });
       if (!room) {
-        throw new Error("해당 거래에 참여한 유저만 평가를 남길 수 있습니다.");
+        throw new Error("완료된 거래에 참여한 유저만 평가를 남길 수 있습니다.");
+      }
+      if (room.auction?.status !== "COMPLETED") {
+        throw new Error("거래 완료 후 평가를 남길 수 있습니다.");
       }
 
       const newReview = await tx.review.create({
@@ -60,7 +70,6 @@ router.post('/', authenticateToken, async (req, res) => {
         data: {
           reputationScore: aggregate._avg.rating || 0,
           reviewCount: aggregate._count.rating,
-          successfulTrades: { increment: 1 }
         }
       });
 

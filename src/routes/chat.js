@@ -94,9 +94,20 @@ router.post('/rooms/admin', async (req, res) => {
   }
 });
 
+const includeRoomRelations = {
+  seller: { select: { id: true, ingameName: true, reputationScore: true } },
+  buyer: { select: { id: true, ingameName: true, reputationScore: true } },
+  messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+  _count: {
+    select: {
+      messages: true
+    }
+  }
+};
+
 /**
- * [PATCH] 거래 종료 (Finish 버튼 대응)
- * 💡 트랜잭션을 통해 평점 반영과 방 종료를 동시에 처리
+ * [PATCH] 거래 확정
+ * 한쪽만 확정하면 대기 상태를 유지하고, 양측 확정 시 경매 완료 및 시세 반영.
  */
 router.patch('/rooms/:id/close', async (req, res) => {
   try {
@@ -104,7 +115,8 @@ router.patch('/rooms/:id/close', async (req, res) => {
     const userId = req.user.id;
 
     const room = await prisma.chatRoom.findUnique({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(id) },
+      include: { auction: true }
     });
 
     if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
@@ -114,17 +126,105 @@ router.patch('/rooms/:id/close', async (req, res) => {
       return res.status(403).json({ error: "권한이 없습니다." });
     }
 
-    // 💡 패치: 평점 및 거래 횟수 조작 로직은 reviews.js로 완전히 이관
-    // 여기서는 순수하게 채팅방의 상태만 종료(ARCHIVED)로 변경합니다.
-    await prisma.chatRoom.update({
-      where: { id: parseInt(id) },
-      data: { status: 'ARCHIVED' }
+    if (room.isAdminChat || !room.auctionId || !room.auction) {
+      return res.status(400).json({ error: "거래 확정 대상이 아닙니다." });
+    }
+    if (room.status !== 'ACTIVE') {
+      return res.status(400).json({ error: "이미 종료된 거래입니다." });
+    }
+    if ((room.sellerId === userId && room.sellerConfirmed) || (room.buyerId === userId && room.buyerConfirmed)) {
+      return res.json({
+        completed: false,
+        message: "이미 거래 확정을 완료했습니다. 상대방의 확정을 기다리고 있습니다.",
+        room,
+      });
+    }
+
+    const nextSellerConfirmed = room.sellerConfirmed || room.sellerId === userId;
+    const nextBuyerConfirmed = room.buyerConfirmed || room.buyerId === userId;
+
+    if (!nextSellerConfirmed || !nextBuyerConfirmed) {
+      const partnerId = room.sellerId === userId ? room.buyerId : room.sellerId;
+      const updatedRoom = await prisma.chatRoom.update({
+        where: { id: parseInt(id) },
+        data: {
+          sellerConfirmed: nextSellerConfirmed,
+          buyerConfirmed: nextBuyerConfirmed,
+        },
+        include: includeRoomRelations,
+      });
+
+      await prisma.notification.create({
+        data: {
+          userId: partnerId,
+          type: "TRADE",
+          message: "상대방이 거래를 확정했습니다. 거래 내용을 확인한 뒤 확정해주세요.",
+          link: `/auction/${room.auctionId}`,
+        },
+      });
+
+      return res.json({
+        completed: false,
+        message: "거래 확정이 기록되었습니다. 상대방의 확정을 기다리고 있습니다.",
+        room: updatedRoom,
+      });
+    }
+
+    const completedRoom = await prisma.$transaction(async (tx) => {
+      const auction = await tx.auction.update({
+        where: { id: room.auctionId },
+        data: { status: 'COMPLETED' },
+      });
+
+      await tx.marketHistory.create({
+        data: {
+          itemId: auction.itemId,
+          price: auction.currentPrice,
+          enhancementLevel: auction.enhancementLevel,
+          enhancementRank: auction.enhancementRank,
+          enchantments: auction.enchantments,
+          imprint: auction.imprint,
+          skills: auction.skills,
+          runes: auction.runes,
+          isValid: true,
+        },
+      });
+
+      await tx.user.update({ where: { id: room.sellerId }, data: { successfulTrades: { increment: 1 } } });
+      await tx.user.update({ where: { id: room.buyerId }, data: { successfulTrades: { increment: 1 } } });
+
+      await tx.notification.createMany({
+        data: [
+          {
+            userId: room.sellerId,
+            type: "TRADE",
+            message: "거래가 완료되었습니다. 상대방 평가를 남겨주세요.",
+            link: `/auction/${room.auctionId}`,
+          },
+          {
+            userId: room.buyerId,
+            type: "TRADE",
+            message: "거래가 완료되었습니다. 상대방 평가를 남겨주세요.",
+            link: `/auction/${room.auctionId}`,
+          },
+        ],
+      });
+
+      return tx.chatRoom.update({
+        where: { id: parseInt(id) },
+        data: {
+          status: 'ARCHIVED',
+          sellerConfirmed: true,
+          buyerConfirmed: true,
+        },
+        include: includeRoomRelations,
+      });
     });
 
-    res.json({ message: "거래가 안전하게 종료되었습니다." });
+    res.json({ completed: true, message: "양측 거래 확정이 완료되었습니다.", room: completedRoom });
   } catch (error) {
     console.error("Finish Error:", error);
-    res.status(500).json({ error: "거래 종료 처리 실패" });
+    res.status(500).json({ error: "거래 확정 처리 실패" });
   }
 });
 
@@ -147,14 +247,25 @@ router.post('/rooms/:id/report', async (req, res) => {
       return res.status(403).json({ error: "신고 권한이 없습니다." });
     }
 
-    const report = await prisma.report.create({
-      data: {
-        roomId: parseInt(id),
-        reporterId: reporterId,
-        targetId: parseInt(targetId),
-        reason: reason,
-        isResolved: false
+    const report = await prisma.$transaction(async (tx) => {
+      const createdReport = await tx.report.create({
+        data: {
+          roomId: parseInt(id),
+          reporterId: reporterId,
+          targetId: parseInt(targetId),
+          reason: reason,
+          isResolved: false
+        }
+      });
+
+      if (!room.isAdminChat && room.auctionId) {
+        await tx.auction.update({
+          where: { id: room.auctionId },
+          data: { status: "DISPUTED" }
+        });
       }
+
+      return createdReport;
     });
 
     res.status(201).json({ message: "신고가 접수되었습니다.", reportId: report.id });

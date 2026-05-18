@@ -12,6 +12,7 @@ enum AuctionStatus {
   ACTIVE
   PENDING_TRADE
   COMPLETED
+  DISPUTED
   CANCELED
   EXPIRED
 }
@@ -31,7 +32,7 @@ model User {
   ingameName        String   @unique
   role              String   @default("USER") // "ADMIN" 포함
   isBanned         Boolean  @default(false) // 밴 상태
-  reputationScore   Float    @default(5.0)
+  reputationScore   Float    @default(0)
   reviewCount       Int      @default(0)
   successfulTrades  Int      @default(0)
   preferences       Json?
@@ -48,6 +49,7 @@ model User {
   messages           Message[]
   givenReviews       Review[]        @relation("Reviewer")
   receivedReviews    Review[]        @relation("Reviewee")
+  auctionComments    AuctionComment[]
   sentReports        Report[]        @relation("Reporter")
   receivedReports    Report[]        @relation("Target")
   
@@ -92,6 +94,7 @@ model Auction {
   bids               Bid[]
   chatRoom           ChatRoom?
   reviews            Review[]
+  comments           AuctionComment[]
 
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
@@ -133,6 +136,21 @@ model Bid {
 
   @@index([auctionId, bidAmount(sort: Desc)])
   @@index([bidderId])
+}
+
+model AuctionComment {
+  id          Int      @id @default(autoincrement())
+  auctionId   Int
+  authorId    Int
+  content     String   @db.Text
+
+  auction     Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  author      User     @relation(fields: [authorId], references: [id])
+
+  createdAt   DateTime @default(now())
+
+  @@index([auctionId, createdAt])
+  @@index([authorId])
 }
 
 model MarketVariable {
@@ -187,6 +205,8 @@ model ChatRoom {
   sellerId     Int
   buyerId      Int
   status       String   @default("ACTIVE")
+  sellerConfirmed Boolean @default(false)
+  buyerConfirmed  Boolean @default(false)
   
   isAdminChat  Boolean  @default(false)
   createdAt    DateTime @default(now())

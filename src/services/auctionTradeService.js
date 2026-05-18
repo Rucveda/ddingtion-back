@@ -83,7 +83,7 @@ export const buyNowAuction = async ({ auctionId, user, redisConnection, auctionQ
       throw new AuctionServiceError("본인이 등록한 물품은 구매할 수 없습니다.", 400);
     }
 
-    await tx.auction.update({ where: { id: auctionId }, data: { status: "COMPLETED", currentPrice: auction.buyNowPrice } });
+    await tx.auction.update({ where: { id: auctionId }, data: { status: "PENDING_TRADE", currentPrice: auction.buyNowPrice } });
     await tx.bid.create({ data: { auctionId, bidderId: user.id, bidAmount: auction.buyNowPrice } });
 
     const newRoom = await tx.chatRoom.create({ data: { auctionId, sellerId: auction.sellerId, buyerId: user.id, isAdminChat: false } });
@@ -92,22 +92,8 @@ export const buyNowAuction = async ({ auctionId, user, redisConnection, auctionQ
       data: {
         userId: auction.sellerId,
         type: "TRADE",
-        message: "전리품 거래가 즉시 성사되었습니다. 구매자를 평가해주세요!",
+        message: "전리품 거래가 즉시 성사되었습니다. 구매자와 거래를 확정해주세요.",
         link: `/auction/${auctionId}`,
-      },
-    });
-
-    await tx.marketHistory.create({
-      data: {
-        itemId: auction.itemId,
-        enhancementLevel: auction.enhancementLevel,
-        enhancementRank: auction.enhancementRank,
-        enchantments: auction.enchantments,
-        imprint: auction.imprint,
-        skills: auction.skills,
-        runes: auction.runes,
-        price: auction.buyNowPrice,
-        isValid: true,
       },
     });
 

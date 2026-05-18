@@ -204,7 +204,7 @@ router.post('/register', async (req, res) => {
         passwordHash: hashedPassword, 
         ingameName, 
         role: "USER",
-        reputationScore: 5.0,
+        reputationScore: 0,
         reviewCount: 0
       } 
     });

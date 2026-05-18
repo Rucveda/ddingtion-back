@@ -40,7 +40,7 @@ const worker = new Worker('auctionQueue', async (job) => {
           // 경매 상태 변경
           prisma.auction.update({
             where: { id: auctionId },
-            data: { status: 'COMPLETED' }
+            data: { status: 'PENDING_TRADE' }
           }),
           // 채팅방 자동 개설 (구매자-판매자 연결)
           prisma.chatRoom.create({
@@ -56,24 +56,10 @@ const worker = new Worker('auctionQueue', async (job) => {
             data: {
               userId: lastBid.bidderId,
               type: 'TRADE',
-              message: `축하합니다! [${auction.item.name}] 경매에 낙찰되셨습니다. 채팅을 확인하세요!`,
+              message: `축하합니다! [${auction.item.name}] 경매에 낙찰되셨습니다. 채팅에서 거래를 확정해주세요!`,
               link: `/auction/${auctionId}`
             }
           }),
-          // 💡 [핵심 패치] 정상 낙찰된 기록을 시세(MarketHistory) 데이터에 추가
-          prisma.marketHistory.create({
-            data: {
-              itemId: auction.itemId,
-              price: lastBid.bidAmount,
-              enhancementLevel: auction.enhancementLevel,
-              enhancementRank: auction.enhancementRank,
-              enchantments: auction.enchantments,
-              imprint: auction.imprint,
-              skills: auction.skills,
-              runes: auction.runes,
-              isValid: true
-            }
-          })
         ]);
         
         // 💡 핵심 패치: 워커가 백엔드 소켓 서버(socket.js)에게 경매 종료 이벤트를 발송하여 모든 유저의 화면을 갱신
