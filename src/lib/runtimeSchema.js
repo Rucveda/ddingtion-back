@@ -12,6 +12,14 @@ export const ensureRuntimeSchema = async (prisma) => {
   `);
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "sellerConfirmed" BOOLEAN NOT NULL DEFAULT false;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "buyerConfirmed" BOOLEAN NOT NULL DEFAULT false;
+  `);
+
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'GENERAL';
   `);
 
@@ -19,5 +27,5 @@ export const ensureRuntimeSchema = async (prisma) => {
     CREATE INDEX IF NOT EXISTS "Post_category_idx" ON "Post"("category");
   `);
 
-  console.log("✅ 런타임 DB 스키마 확인 완료: User.discordId, Post.category");
+  console.log("✅ 런타임 DB 스키마 확인 완료: User.discordId, ChatRoom confirmations, Post.category");
 };
