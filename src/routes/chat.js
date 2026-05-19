@@ -105,6 +105,13 @@ const includeRoomRelations = {
   }
 };
 
+const emitTradeRoomUpdate = (req, room) => {
+  const io = req.app.get('io');
+  if (!io || !room) return;
+  io.to(`user_${room.sellerId}`).to(`user_${room.buyerId}`).emit('refresh_chat_rooms');
+  io.to(`user_${room.sellerId}`).to(`user_${room.buyerId}`).emit('room_updated', { room });
+};
+
 /**
  * [PATCH] 거래 확정
  * 한쪽만 확정하면 대기 상태를 유지하고, 양측 확정 시 경매 완료 및 시세 반영.
@@ -163,6 +170,8 @@ router.patch('/rooms/:id/close', async (req, res) => {
         },
       });
 
+      emitTradeRoomUpdate(req, updatedRoom);
+
       return res.json({
         completed: false,
         message: "거래 확정이 기록되었습니다. 상대방의 확정을 기다리고 있습니다.",
@@ -220,6 +229,8 @@ router.patch('/rooms/:id/close', async (req, res) => {
         include: includeRoomRelations,
       });
     });
+
+    emitTradeRoomUpdate(req, completedRoom);
 
     res.json({ completed: true, message: "양측 거래 확정이 완료되었습니다.", room: completedRoom });
   } catch (error) {
