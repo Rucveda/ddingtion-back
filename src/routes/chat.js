@@ -189,6 +189,7 @@ router.patch('/rooms/:id/close', async (req, res) => {
 
       await tx.marketHistory.create({
         data: {
+          auctionId: auction.id,
           itemId: auction.itemId,
           price: auction.currentPrice,
           enhancementLevel: auction.enhancementLevel,

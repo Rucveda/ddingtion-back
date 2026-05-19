@@ -1,4 +1,5 @@
 import prisma from "../db.js";
+import { attachMarketReflected } from "../lib/marketHistoryRef.js";
 
 export const getAuctionItems = async () => {
   return prisma.item.findMany({ orderBy: { name: "asc" } });
@@ -62,7 +63,7 @@ export const getUserAuctions = async (userId) => {
     take: 200,
   });
 
-  return auctions.map((auction) => {
+  const mapped = auctions.map((auction) => {
     const topBid = auction.bids[0];
     return {
       ...auction,
@@ -73,6 +74,8 @@ export const getUserAuctions = async (userId) => {
       lastBidderId: topBid?.bidderId || null,
     };
   });
+
+  return attachMarketReflected(mapped);
 };
 
 export const getUserBidAuctions = async (userId) => {
@@ -123,7 +126,7 @@ export const getUserBidAuctions = async (userId) => {
     });
   }
 
-  return Array.from(uniqueAuctions.values());
+  return attachMarketReflected(Array.from(uniqueAuctions.values()));
 };
 
 export const getAuctionDetail = async (auctionId) => {

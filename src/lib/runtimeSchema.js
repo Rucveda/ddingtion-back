@@ -95,6 +95,14 @@ export const ensureRuntimeSchema = async (prisma) => {
   `);
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "MarketHistory" ADD COLUMN IF NOT EXISTS "auctionId" INTEGER;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "MarketHistory_auctionId_key" ON "MarketHistory"("auctionId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "PostCategoryGuide" (
       "category" TEXT NOT NULL,
       "guideText" TEXT NOT NULL,

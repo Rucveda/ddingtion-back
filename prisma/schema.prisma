@@ -175,6 +175,7 @@ model MarketVariable {
 
 model MarketHistory {
   id                 Int      @id @default(autoincrement())
+  auctionId          Int?     @unique
   itemId             Int
   item               Item     @relation(fields: [itemId], references: [id])
   
