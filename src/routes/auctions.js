@@ -164,6 +164,14 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
                     link: `/auction/${auctionId}`
                 }
             });
+
+            const io = req.app.get('io');
+            if (io) {
+                io.to(`user_${auction.sellerId}`).emit('notification_update', {
+                    type: 'COMMENT',
+                    auctionId,
+                });
+            }
         }
 
         res.status(201).json(comment);
