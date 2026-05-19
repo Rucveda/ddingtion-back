@@ -14,6 +14,7 @@ enum AuctionStatus {
   COMPLETED
   DISPUTED
   CANCELED
+  CANCEL_PENDING
   EXPIRED
 }
 
@@ -32,6 +33,7 @@ model User {
   ingameName        String   @unique
   role              String   @default("USER") // "ADMIN" 포함
   isBanned         Boolean  @default(false) // 밴 상태
+  bannedIp         String?  // 강력 밴 시 등록된 IP (관리자)
   reputationScore   Float    @default(0)
   reviewCount       Int      @default(0)
   successfulTrades  Int      @default(0)
@@ -88,6 +90,7 @@ model Auction {
   startTime          DateTime      @default(now())
   endTime            DateTime
   status             AuctionStatus @default(ACTIVE)
+  cancelRequestedAt  DateTime?
 
   seller             User          @relation("SellerAuctions", fields: [sellerId], references: [id])
   item               Item          @relation(fields: [itemId], references: [id])
@@ -260,13 +263,17 @@ model Review {
 }
 
 model Report {
-  id          Int      @id @default(autoincrement())
-  roomId      Int
-  reporterId  Int
-  targetId    Int
-  reason      String   @db.Text
-  isResolved  Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  id                    Int      @id @default(autoincrement())
+  roomId                Int
+  auctionId             Int?
+  reporterId            Int
+  targetId              Int
+  reason                String   @db.Text
+  isResolved            Boolean  @default(false)
+  previousAuctionStatus String?
+  disputeAction         String?
+  adminNote             String?  @db.Text
+  createdAt             DateTime @default(now())
 
   room        ChatRoom @relation(fields: [roomId], references: [id])
   reporter    User     @relation("Reporter", fields: [reporterId], references: [id])

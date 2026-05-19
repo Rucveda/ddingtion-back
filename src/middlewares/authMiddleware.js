@@ -32,13 +32,21 @@ const authenticateToken = async (req, res, next) => {
         id: true, 
         role: true, 
         ingameName: true,
-        discordId: true // 💡 디스코드 연동 여부 확인을 위해 추가
+        discordId: true,
+        isBanned: true,
       }
     });
 
     if (!user) {
       // DB가 리셋되었거나 유저가 삭제된 경우
       return res.status(401).json({ error: "존재하지 않는 계정 정보입니다. 다시 로그인해주세요." });
+    }
+
+    if (user.isBanned) {
+      return res.status(403).json({
+        code: "ACCOUNT_BANNED",
+        error: "관리자에 의해 차단된 계정입니다.",
+      });
     }
 
     // 3. 검증된 유저 정보를 req.user에 저장

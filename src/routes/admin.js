@@ -206,7 +206,22 @@ router.get('/reports', async (req, res) => {
         include: {
           reporter: { select: { id: true, ingameName: true } },
           target: { select: { id: true, ingameName: true } },
-          room: { select: { id: true, status: true } }
+          room: {
+            select: {
+              id: true,
+              status: true,
+              auctionId: true,
+              auction: {
+                select: {
+                  id: true,
+                  status: true,
+                  currentPrice: true,
+                  endTime: true,
+                  item: { select: { name: true } },
+                },
+              },
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -214,7 +229,16 @@ router.get('/reports', async (req, res) => {
       }),
       prisma.report.count(),
     ]);
-    res.json(paginatedResponse({ items: reports, total, page, limit }));
+    const safeReports = reports.map((report) => ({
+      ...report,
+      auction: report.room?.auction
+        ? {
+            ...report.room.auction,
+            currentPrice: report.room.auction.currentPrice?.toString?.() ?? report.room.auction.currentPrice,
+          }
+        : null,
+    }));
+    res.json(paginatedResponse({ items: safeReports, total, page, limit }));
   } catch (error) {
     res.status(500).json({ error: "신고 내역 로드 실패" });
   }
@@ -232,6 +256,41 @@ router.patch('/reports/:id/resolve', async (req, res) => {
     res.json({ message: "신고 처리 완료", updatedReport });
   } catch (error) {
     res.status(500).json({ error: "상태 변경 실패" });
+  }
+});
+
+/**
+ * [PATCH] 분쟁 신고 처리 (경매 복구/완료/유찴 유지)
+ */
+router.patch('/reports/:id/dispute', async (req, res) => {
+  try {
+    const reportId = parseInt(req.params.id, 10);
+    const { action, adminNote } = req.body;
+    if (!action) {
+      return res.status(400).json({ error: "처리 액션(action)이 필요합니다." });
+    }
+
+    const { applyDisputeAdminAction } = await import("../services/disputeService.js");
+    const result = await applyDisputeAdminAction({
+      reportId,
+      action,
+      adminNote,
+    });
+
+    res.json({
+      message: "분쟁 처리가 반영되었습니다.",
+      report: result.report,
+      auction: result.auction
+        ? {
+            ...result.auction,
+            currentPrice: result.auction.currentPrice?.toString?.() ?? result.auction.currentPrice,
+            startPrice: result.auction.startPrice?.toString?.() ?? result.auction.startPrice,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Dispute action error:", error);
+    res.status(error.status || 500).json({ error: error.message || "분쟁 처리 실패" });
   }
 });
 
@@ -451,6 +510,74 @@ router.patch('/users/:id/ban', async (req, res) => {
 });
 
 /**
+ * [PATCH] 강력 밴 (계정 + IP) — 관리자 패널 전용
+ */
+router.patch('/users/:id/strict-ban', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const enable = req.body?.enable !== false;
+
+    const { createRedisClient } = await import("../lib/redis.js");
+    const {
+      addStrictBannedIp,
+      removeStrictBannedIp,
+    } = await import("../lib/strictIpBan.js");
+    const redis = createRedisClient();
+
+    const existing = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, bannedIp: true, ingameName: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "사용자를 찾을 수 없습니다." });
+    }
+
+    let bannedIp = existing.bannedIp;
+    if (enable) {
+      bannedIp = (await redis.get(`user_ip:${userId}`)) || existing.bannedIp || null;
+      if (bannedIp) {
+        await addStrictBannedIp(bannedIp);
+      }
+    } else if (bannedIp) {
+      await removeStrictBannedIp(bannedIp);
+      bannedIp = null;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isBanned: enable,
+        bannedIp: enable ? bannedIp : null,
+      },
+      select: {
+        id: true,
+        loginId: true,
+        ingameName: true,
+        isBanned: true,
+        bannedIp: true,
+        discordId: true,
+      },
+    });
+
+    res.json({
+      message: enable
+        ? bannedIp
+          ? `${user.ingameName} 계정 및 IP(${bannedIp}) 강력 밴이 적용되었습니다.`
+          : `${user.ingameName} 계정이 차단되었습니다. (최근 IP 기록 없음)`
+        : `${user.ingameName} 강력 밴이 해제되었습니다.`,
+      user: {
+        ...user,
+        discordLinked: Boolean(user.discordId),
+        strictBanActive: enable && Boolean(user.bannedIp),
+      },
+    });
+  } catch (error) {
+    console.error("Strict ban error:", error);
+    res.status(500).json({ error: "강력 밴 처리 실패" });
+  }
+});
+
+/**
  * [PATCH] 오류 계정 익명화
  * 외래키가 얽힌 거래 기록은 보존하고, 로그인/닉네임/Discord 식별만 제거합니다.
  */
@@ -528,7 +655,8 @@ router.get('/users', async (req, res) => {
           loginId: true, 
           ingameName: true, 
           role: true, 
-          isBanned: true, // 💡 밴 상태 추가
+          isBanned: true,
+          bannedIp: true,
           createdAt: true, 
           reputationScore: true, 
           successfulTrades: true,
@@ -543,6 +671,7 @@ router.get('/users', async (req, res) => {
     const safeUsers = users.map(({ discordId, ...user }) => ({
       ...user,
       discordLinked: Boolean(discordId),
+      strictBanActive: Boolean(user.isBanned && user.bannedIp),
     }));
     res.json(paginatedResponse({ items: safeUsers, total, page, limit }));
   } catch (error) {

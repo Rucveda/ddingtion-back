@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq';
 import prisma from '../db.js';
 import { createRedisClient } from '../lib/redis.js';
+import { finalizeSellerCancel } from '../lib/auctionCancel.js';
 
 // 💡 패치: 클라우드 Redis(Render, Upstash 등)를 위한 TLS 설정 및 퍼블리셔 추가
 const redisConnection = createRedisClient();
@@ -8,6 +9,19 @@ const publisher = createRedisClient();
 
 // 워커 생성
 const worker = new Worker('auctionQueue', async (job) => {
+  if (job.name === 'finalizeCancel') {
+    const { auctionId } = job.data;
+    try {
+      const updated = await finalizeSellerCancel(auctionId);
+      if (updated) {
+        console.log(`[경매 ${auctionId}] 판매자 취소 확정 - 유찰 처리`);
+      }
+    } catch (error) {
+      console.error(`[경매 ${auctionId}] 취소 확정 처리 중 오류:`, error);
+    }
+    return;
+  }
+
   if (job.name === 'endAuction') {
     const { auctionId } = job.data;
 

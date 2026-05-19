@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import { env, getDiscordConfigStatus, isDiscordVerificationEnforced } from '../config/env.js';
+import { getClientIp } from '../lib/strictIpBan.js';
+import { clearLoginRateLimit, enforceLoginRateLimit, RateLimitError } from '../lib/rateLimit.js';
 import {
   buildDiscordAuthorizeUrl,
   exchangeDiscordCode,
@@ -419,6 +421,9 @@ router.post('/login', async (req, res) => {
     let { loginId, password } = req.body;
     if (!loginId || !password) return res.status(400).json({ error: "정보를 입력해주세요." });
 
+    const clientIp = req.clientIp || getClientIp(req);
+    await enforceLoginRateLimit(clientIp);
+
     loginId = loginId.trim();
 
     const user = await prisma.user.findUnique({
@@ -439,6 +444,8 @@ router.post('/login', async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return res.status(401).json({ error: "아이디 또는 비밀번호가 잘못되었습니다." });
     }
+
+    await clearLoginRateLimit(clientIp);
 
     if (user.isBanned) {
       return res.status(403).json({
@@ -475,6 +482,13 @@ router.post('/login', async (req, res) => {
       } 
     });
   } catch (error) {
+    if (error instanceof RateLimitError) {
+      return res.status(error.status).json({
+        code: "RATE_LIMITED",
+        error: error.message,
+        retryAfterSec: error.retryAfterSec,
+      });
+    }
     console.error("로그인 오류:", error);
     res.status(500).json({ error: "로그인 처리 중 오류가 발생했습니다." });
   }

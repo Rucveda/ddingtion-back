@@ -2,6 +2,8 @@ import express from 'express';
 const router = express.Router();
 import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
+import { checkDiscordLinked } from '../middlewares/discordCheck.js';
+import { rejectBannedAccount } from '../middlewares/accessGuards.js';
 
 const POST_CATEGORIES = new Set(['GENERAL', 'WILD', 'ISLAND', 'RPG', 'TRADE', 'QUESTION']);
 const normalizePostCategory = (category) => {
@@ -49,7 +51,7 @@ router.get('/', async (req, res) => {
 /**
  * [POST] 글 작성 (권한 검증 포함)
  */
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
   try {
     const { title, content, type = "GENERAL", category = "GENERAL" } = req.body;
     const userRole = req.user.role ? req.user.role.toUpperCase() : 'USER';
@@ -57,11 +59,6 @@ router.post('/', authenticateToken, async (req, res) => {
 
     if (postType === 'NOTICE' && userRole !== 'ADMIN') {
       return res.status(403).json({ error: "공지사항 작성 권한이 없습니다." });
-    }
-
-    const allowedRoles = ['ADMIN', 'WRITER'];
-    if (postType === 'GENERAL' && !allowedRoles.includes(userRole) && !req.user.discordId) {
-      return res.status(403).json({ error: "게시글 작성 권한이 없습니다." });
     }
 
     if (!title || !content) {

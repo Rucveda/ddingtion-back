@@ -20,7 +20,7 @@ export const getCompletedHistory = async ({ itemId, limit }) => {
 export const getActiveAuctions = async () => {
   const now = new Date();
   const auctions = await prisma.auction.findMany({
-    where: { status: "ACTIVE", endTime: { gt: now } },
+    where: { status: { in: ["ACTIVE", "CANCEL_PENDING"] }, endTime: { gt: now } },
     include: {
       item: true,
       seller: { select: { id: true, ingameName: true, reputationScore: true } },

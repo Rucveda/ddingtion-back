@@ -1,6 +1,8 @@
 import express from 'express';
 const router = express.Router();
 import authenticateToken from '../middlewares/authMiddleware.js';
+import { checkDiscordLinked } from '../middlewares/discordCheck.js';
+import { rejectBannedAccount } from '../middlewares/accessGuards.js';
 import prisma from '../db.js';
 
 // 모든 채팅 API는 로그인이 필요함
@@ -242,7 +244,7 @@ router.patch('/rooms/:id/close', async (req, res) => {
 /**
  * [POST] 유저 신고 접수
  */
-router.post('/rooms/:id/report', async (req, res) => {
+router.post('/rooms/:id/report', rejectBannedAccount, checkDiscordLinked, async (req, res) => {
   try {
     const { id } = req.params;
     const { targetId, reason } = req.body;
@@ -259,27 +261,44 @@ router.post('/rooms/:id/report', async (req, res) => {
     }
 
     const report = await prisma.$transaction(async (tx) => {
+      let previousAuctionStatus = null;
+      let auctionId = room.auctionId || null;
+
+      if (!room.isAdminChat && room.auctionId) {
+        const auction = await tx.auction.findUnique({ where: { id: room.auctionId } });
+        if (auction) {
+          previousAuctionStatus = auction.status;
+          await tx.auction.update({
+            where: { id: room.auctionId },
+            data: { status: "EXPIRED" },
+          });
+        }
+      }
+
       const createdReport = await tx.report.create({
         data: {
           roomId: parseInt(id),
+          auctionId,
           reporterId: reporterId,
           targetId: parseInt(targetId),
           reason: reason,
-          isResolved: false
-        }
+          isResolved: false,
+          previousAuctionStatus,
+        },
       });
-
-      if (!room.isAdminChat && room.auctionId) {
-        await tx.auction.update({
-          where: { id: room.auctionId },
-          data: { status: "DISPUTED" }
-        });
-      }
 
       return createdReport;
     });
 
-    res.status(201).json({ message: "신고가 접수되었습니다.", reportId: report.id });
+    if (!room.isAdminChat && room.auctionId) {
+      const { removeAuctionQueueJobs } = await import("../lib/auctionCancel.js");
+      await removeAuctionQueueJobs(room.auctionId);
+    }
+
+    res.status(201).json({
+      message: "신고가 접수되었습니다. 연결된 경매는 우선 유찰 처리되며, 관리자가 복구·완료를 검토합니다.",
+      reportId: report.id,
+    });
   } catch (error) {
     res.status(500).json({ error: "신고 접수 실패" });
   }

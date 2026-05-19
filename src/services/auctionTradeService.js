@@ -116,10 +116,6 @@ export const buyNowAuction = async ({ auctionId, user, redisConnection, auctionQ
       throw new AuctionServiceError("이미 판매 완료되었거나 무효한 경매입니다.", 400);
     }
 
-    const sellerIp = await redisConnection.get(`user_ip:${auction.sellerId}`);
-    if (sellerIp && sellerIp === clientIp) {
-      throw new AuctionServiceError("동일한 네트워크(IP) 환경에서는 즉시 구매할 수 없습니다. (다중 계정 악용 방지)", 403);
-    }
     if (!auction.buyNowPrice) {
       throw new AuctionServiceError("즉시 구매가 불가능한 경매입니다.", 400);
     }

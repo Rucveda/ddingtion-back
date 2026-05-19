@@ -12,7 +12,7 @@ const checkDiscordLinked = (req, res, next) => {
     return res.status(403).json({
       code: "DISCORD_REQUIRED",
       error:
-        "디스코드 인증이 필요합니다. 마이페이지에서 계정을 연동한 뒤 입찰·구매할 수 있습니다.",
+        "디스코드 인증이 필요합니다. 마이페이지에서 연동하기 전까지 조회만 가능합니다.",
     });
   }
   next();

@@ -70,5 +70,33 @@ export const ensureRuntimeSchema = async (prisma) => {
     END $$;
   `);
 
-  console.log("✅ 런타임 DB 스키마 확인 완료: User.discordId, ChatRoom confirmations, Post.category, AuctionComment");
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "bannedIp" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Auction" ADD COLUMN IF NOT EXISTS "cancelRequestedAt" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "auctionId" INTEGER;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "previousAuctionStatus" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "disputeAction" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "adminNote" TEXT;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TYPE "AuctionStatus" ADD VALUE IF NOT EXISTS 'CANCEL_PENDING';
+  `);
+
+  console.log("✅ 런타임 DB 스키마 확인 완료");
 };

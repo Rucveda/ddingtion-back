@@ -8,6 +8,8 @@ import {
   shouldExtendAuctionOnBid,
 } from './lib/bidIncrement.js';
 import { rescheduleAuctionEndJob } from './lib/auctionQueueJobs.js';
+import { enforceBidRateLimit, RateLimitError } from './lib/rateLimit.js';
+import { assertIpNotStrictBanned, getSocketClientIp } from './lib/strictIpBan.js';
 
 const setupSocket = (io) => {
   // --- [Redis Pub/Sub 구독 설정 (워커 이벤트 수신용)] ---
@@ -36,8 +38,7 @@ const setupSocket = (io) => {
   io.on('connection', (socket) => {
     console.log('유저 접속:', socket.id);
     
-    // 💡 유저의 실제 접속 IP 추출
-    const clientIp = socket.handshake.headers['x-forwarded-for']?.split(',')[0]?.trim() || socket.handshake.address;
+    const clientIp = getSocketClientIp(socket);
 
     // --- 🔔 알림 설정 ---
     socket.on('setup_notifications', (userId) => {
@@ -67,6 +68,9 @@ const setupSocket = (io) => {
         }
         
         const parsedUserId = parseInt(decodedUser.id);
+
+        await assertIpNotStrictBanned(clientIp);
+        await enforceBidRateLimit(parsedUserId);
 
         if (isDiscordVerificationEnforced()) {
           const bidder = await prisma.user.findUnique({
@@ -98,6 +102,9 @@ const setupSocket = (io) => {
           const auction = auctions[0];
 
           if (!auction || auction.status !== 'ACTIVE') {
+            if (auction?.status === 'CANCEL_PENDING') {
+              throw new Error("판매자 취소 보류 중인 경매에는 입찰할 수 없습니다.");
+            }
             throw new Error("이미 종료되었거나 무효한 경매입니다.");
           }
 
@@ -118,12 +125,6 @@ const setupSocket = (io) => {
             throw new Error("본인이 등록한 경매에는 입찰할 수 없습니다.");
           }
           
-          // 💡 어뷰징 방어: 판매자의 최근 접속 IP와 현재 입찰자의 IP가 동일한 경우 (다중 계정 자전거래 차단)
-          const sellerIp = await redisConnection.get(`user_ip:${auction.sellerId}`);
-          if (sellerIp && sellerIp === clientIp) {
-            throw new Error("동일한 네트워크(IP) 환경에서는 입찰할 수 없습니다. (다중 계정 악용 방지)");
-          }
-
           const willExtend = shouldExtendAuctionOnBid(auctionEndTime, bidNow);
           const nextEndTime = willExtend ? computeExtendedEndTime(auctionEndTime, bidNow) : auctionEndTime;
 

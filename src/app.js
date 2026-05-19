@@ -20,6 +20,7 @@ import chatRoutes from './routes/chat.js';
 import notificationRoutes from './routes/notifications.js';
 import reviewRoutes from './routes/reviews.js';
 import postsRoutes from './routes/posts.js';
+import { attachClientIp, rejectStrictBannedIp } from './middlewares/accessGuards.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -56,6 +57,8 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(attachClientIp);
+app.use('/api', rejectStrictBannedIp);
 
 // --- [라우터 등록] ---
 app.use('/api/auth', authRoutes);      

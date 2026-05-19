@@ -1,6 +1,9 @@
 import express from 'express';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import { checkDiscordLinked } from '../middlewares/discordCheck.js';
+import { rejectBannedAccount } from '../middlewares/accessGuards.js';
+import { enforceCommentRateLimit, RateLimitError } from '../lib/rateLimit.js';
+import { requestSellerCancel } from '../lib/auctionCancel.js';
 import { Queue } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
 import prisma from '../db.js';
@@ -133,10 +136,12 @@ router.get('/:id/comments', async (req, res) => {
     }
 });
 
-router.post('/:id/comments', authenticateToken, async (req, res) => {
+router.post('/:id/comments', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
     try {
         const auctionId = parseInt(req.params.id);
         const content = String(req.body?.content || "").trim();
+
+        await enforceCommentRateLimit(req.user.id);
 
         if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
         if (!content) return res.status(400).json({ error: "댓글 내용을 입력해주세요." });
@@ -144,9 +149,12 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
 
         const auction = await prisma.auction.findUnique({
             where: { id: auctionId },
-            select: { id: true, sellerId: true, item: { select: { name: true } } }
+            select: { id: true, sellerId: true, status: true, item: { select: { name: true } } }
         });
         if (!auction) return res.status(404).json({ error: "경매 없음" });
+        if (auction.status !== "ACTIVE") {
+            return res.status(400).json({ error: "진행 중인 경매에만 댓글을 작성할 수 있습니다." });
+        }
 
         const comment = await prisma.auctionComment.create({
             data: { auctionId, authorId: req.user.id, content },
@@ -176,6 +184,13 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
 
         res.status(201).json(comment);
     } catch (error) {
+        if (error instanceof RateLimitError) {
+            return res.status(error.status).json({
+                code: "RATE_LIMITED",
+                error: error.message,
+                retryAfterSec: error.retryAfterSec,
+            });
+        }
         console.error(error);
         res.status(500).json({ error: "댓글 등록 실패" });
     }
@@ -196,7 +211,7 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
     try {
         const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
         const newAuction = await createAuctionListing({
@@ -220,7 +235,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/:id/relist', authenticateToken, async (req, res) => {
+router.post('/:id/relist', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
     try {
         const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
         const auctionId = parseInt(req.params.id);
@@ -249,7 +264,7 @@ router.post('/:id/relist', authenticateToken, async (req, res) => {
     }
 });
 
-router.post('/:id/buy', authenticateToken, checkDiscordLinked, async (req, res) => {
+router.post('/:id/buy', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
     try {
         const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
         const auctionId = parseInt(req.params.id);
@@ -267,6 +282,31 @@ router.post('/:id/buy', authenticateToken, checkDiscordLinked, async (req, res) 
             return res.status(error.status).json({ error: error.message });
         }
         res.status(500).json({ error: error.message || "처리 실패" });
+    }
+});
+
+router.post('/:id/cancel-request', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
+    try {
+        const auctionId = parseInt(req.params.id);
+        if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
+
+        const result = await requestSellerCancel({
+            auctionId,
+            sellerId: req.user.id,
+        });
+
+        res.json({
+            message: "취소 요청이 접수되었습니다. 5분 후 유찰 처리됩니다.",
+            status: result.auction.status,
+            cancelRequestedAt: result.cancelRequestedAt,
+            finalizeAt: result.finalizeAt,
+        });
+    } catch (error) {
+        if (error instanceof AuctionServiceError) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error("Cancel request error:", error);
+        res.status(500).json({ error: "취소 요청 실패" });
     }
 });
 
