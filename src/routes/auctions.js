@@ -3,7 +3,7 @@ import authenticateToken from '../middlewares/authMiddleware.js';
 import { checkDiscordLinked } from '../middlewares/discordCheck.js';
 import { rejectBannedAccount } from '../middlewares/accessGuards.js';
 import { enforceCommentRateLimit, RateLimitError } from '../lib/rateLimit.js';
-import { requestSellerCancel } from '../lib/auctionCancel.js';
+import { requestSellerCancel, revokeSellerCancel } from '../lib/auctionCancel.js';
 import { Queue } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
 import prisma from '../db.js';
@@ -307,6 +307,29 @@ router.post('/:id/cancel-request', authenticateToken, rejectBannedAccount, check
         }
         console.error("Cancel request error:", error);
         res.status(500).json({ error: "취소 요청 실패" });
+    }
+});
+
+router.post('/:id/cancel-revoke', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
+    try {
+        const auctionId = parseInt(req.params.id);
+        if (isNaN(auctionId)) return res.status(400).json({ error: "유효하지 않은 경매 ID" });
+
+        const result = await revokeSellerCancel({
+            auctionId,
+            sellerId: req.user.id,
+        });
+
+        res.json({
+            message: "취소 요청을 철회했습니다. 경매가 다시 진행됩니다.",
+            status: result.auction.status,
+        });
+    } catch (error) {
+        if (error instanceof AuctionServiceError) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error("Cancel revoke error:", error);
+        res.status(500).json({ error: "취소 철회 실패" });
     }
 });
 
