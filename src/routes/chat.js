@@ -246,60 +246,40 @@ router.patch('/rooms/:id/close', async (req, res) => {
  */
 router.post('/rooms/:id/report', rejectBannedAccount, checkDiscordLinked, async (req, res) => {
   try {
-    const { id } = req.params;
+    const roomId = parseInt(req.params.id, 10);
     const { targetId, reason } = req.body;
     const reporterId = req.user.id;
 
-    if (!reason) return res.status(400).json({ error: "신고 사유를 입력해주세요." });
+    if (isNaN(roomId)) return res.status(400).json({ error: "유효하지 않은 채팅방입니다." });
+    if (!reason?.trim()) return res.status(400).json({ error: "신고 사유를 입력해주세요." });
+    if (!targetId) return res.status(400).json({ error: "신고 대상을 지정해주세요." });
 
-    // 💡 보안 패치: 본인이 참여한 채팅방인지 먼저 확인
-    const room = await prisma.chatRoom.findUnique({ where: { id: parseInt(id) } });
-    if (!room) return res.status(404).json({ error: "방을 찾을 수 없습니다." });
-    
-    if (room.sellerId !== reporterId && room.buyerId !== reporterId) {
-      return res.status(403).json({ error: "신고 권한이 없습니다." });
-    }
-
-    const report = await prisma.$transaction(async (tx) => {
-      let previousAuctionStatus = null;
-      let auctionId = room.auctionId || null;
-
-      if (!room.isAdminChat && room.auctionId) {
-        const auction = await tx.auction.findUnique({ where: { id: room.auctionId } });
-        if (auction) {
-          previousAuctionStatus = auction.status;
-          await tx.auction.update({
-            where: { id: room.auctionId },
-            data: { status: "EXPIRED" },
-          });
-        }
-      }
-
-      const createdReport = await tx.report.create({
-        data: {
-          roomId: parseInt(id),
-          auctionId,
-          reporterId: reporterId,
-          targetId: parseInt(targetId),
-          reason: reason,
-          isResolved: false,
-          previousAuctionStatus,
-        },
-      });
-
-      return createdReport;
+    const { submitTradeRoomReport } = await import("../lib/tradeReport.js");
+    const { report } = await submitTradeRoomReport({
+      roomId,
+      reporterId,
+      targetId: parseInt(targetId, 10),
+      reason: reason.trim(),
     });
 
-    if (!room.isAdminChat && room.auctionId) {
-      const { removeAuctionQueueJobs } = await import("../lib/auctionCancel.js");
-      await removeAuctionQueueJobs(room.auctionId);
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("refresh_chat_rooms");
+      io.to(`user_${reporterId}`).emit("trade_report_submitted", { roomId, reportId: report.id });
     }
 
     res.status(201).json({
-      message: "신고가 접수되었습니다. 연결된 경매는 우선 유찰 처리되며, 관리자가 복구·완료를 검토합니다.",
+      message: "신고가 접수되었습니다. 해당 거래는 유찰 처리되었으며, 운영팀이 내용을 확인합니다.",
       reportId: report.id,
     });
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({
+        code: error.code,
+        error: error.message,
+      });
+    }
+    console.error("Report error:", error);
     res.status(500).json({ error: "신고 접수 실패" });
   }
 });

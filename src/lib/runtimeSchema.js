@@ -87,15 +87,11 @@ export const ensureRuntimeSchema = async (prisma) => {
   `);
 
   await prisma.$executeRawUnsafe(`
-    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "disputeAction" TEXT;
-  `);
-
-  await prisma.$executeRawUnsafe(`
-    ALTER TABLE "Report" ADD COLUMN IF NOT EXISTS "adminNote" TEXT;
-  `);
-
-  await prisma.$executeRawUnsafe(`
     ALTER TYPE "AuctionStatus" ADD VALUE IF NOT EXISTS 'CANCEL_PENDING';
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "Report_roomId_key" ON "Report"("roomId");
   `);
 
   console.log("✅ 런타임 DB 스키마 확인 완료");

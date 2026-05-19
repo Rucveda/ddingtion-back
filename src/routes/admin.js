@@ -260,41 +260,6 @@ router.patch('/reports/:id/resolve', async (req, res) => {
 });
 
 /**
- * [PATCH] 분쟁 신고 처리 (경매 복구/완료/유찴 유지)
- */
-router.patch('/reports/:id/dispute', async (req, res) => {
-  try {
-    const reportId = parseInt(req.params.id, 10);
-    const { action, adminNote } = req.body;
-    if (!action) {
-      return res.status(400).json({ error: "처리 액션(action)이 필요합니다." });
-    }
-
-    const { applyDisputeAdminAction } = await import("../services/disputeService.js");
-    const result = await applyDisputeAdminAction({
-      reportId,
-      action,
-      adminNote,
-    });
-
-    res.json({
-      message: "분쟁 처리가 반영되었습니다.",
-      report: result.report,
-      auction: result.auction
-        ? {
-            ...result.auction,
-            currentPrice: result.auction.currentPrice?.toString?.() ?? result.auction.currentPrice,
-            startPrice: result.auction.startPrice?.toString?.() ?? result.auction.startPrice,
-          }
-        : null,
-    });
-  } catch (error) {
-    console.error("Dispute action error:", error);
-    res.status(error.status || 500).json({ error: error.message || "분쟁 처리 실패" });
-  }
-});
-
-/**
  * [DELETE] 해결된 신고 기록 삭제
  */
 router.delete('/reports/:id', async (req, res) => {

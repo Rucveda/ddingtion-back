@@ -271,11 +271,11 @@ model Report {
   reason                String   @db.Text
   isResolved            Boolean  @default(false)
   previousAuctionStatus String?
-  disputeAction         String?
-  adminNote             String?  @db.Text
   createdAt             DateTime @default(now())
 
   room        ChatRoom @relation(fields: [roomId], references: [id])
   reporter    User     @relation("Reporter", fields: [reporterId], references: [id])
   target      User     @relation("Target", fields: [targetId], references: [id])
+
+  @@unique([roomId])
 }
