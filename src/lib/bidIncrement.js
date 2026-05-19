@@ -1,17 +1,17 @@
 /**
  * 구간별 최소 입찰 인상 + 마감 임박 시간 배수
- * - 가격: 백(1천 미만) 1만 / 천(1억 미만) 10만 / 억 50만
+ * - 가격: 백만(100만 미만) 1만 / 천만(1천만 미만) 10만 / 억(1천만 이상) 50만
  * - 시간: 1시간 초과 ×1 / 1시간~10분 ×2 / 10분 이내 ×3
  * - 마감 10분 이내 유효 입찰 시 종료 시각 +3분 (BullMQ 재예약)
  */
 const MS_MINUTE = 60 * 1000;
 const MS_HOUR = 60 * MS_MINUTE;
 
-const TIER_THOUSAND = 1_000n;
-const TIER_EOK = 100_000_000n;
+const TIER_BAEKMAN = 1_000_000n;
+const TIER_CHEONMAN = 10_000_000n;
 
-const INCREMENT_HUNDREDS = 10_000n;
-const INCREMENT_THOUSANDS = 100_000n;
+const INCREMENT_BAEKMAN = 10_000n;
+const INCREMENT_CHEONMAN = 100_000n;
 const INCREMENT_EOK = 500_000n;
 
 export const BID_EXTENSION_THRESHOLD_MS = 10 * MS_MINUTE;
@@ -39,9 +39,9 @@ export const BID_TIME_BANDS = [
 ];
 
 export const PRICE_INCREMENT_TIERS = [
-  { label: "백 단위 (1,000G 미만)", increment: "10,000" },
-  { label: "천 단위 (1,000G ~ 1억G 미만)", increment: "100,000" },
-  { label: "억 단위 (1억G 이상)", increment: "500,000" },
+  { label: "백만 단위 (100만G 미만)", increment: "10000" },
+  { label: "천만 단위 (100만G ~ 1,000만G 미만)", increment: "100000" },
+  { label: "억 단위 (1,000만G 이상)", increment: "500000" },
 ];
 
 export const toBidPriceBigInt = (value) => {
@@ -53,15 +53,15 @@ export const toBidPriceBigInt = (value) => {
 
 export const getBaseMinBidIncrement = (currentPrice) => {
   const price = toBidPriceBigInt(currentPrice);
-  if (price < TIER_THOUSAND) return INCREMENT_HUNDREDS;
-  if (price < TIER_EOK) return INCREMENT_THOUSANDS;
+  if (price < TIER_BAEKMAN) return INCREMENT_BAEKMAN;
+  if (price < TIER_CHEONMAN) return INCREMENT_CHEONMAN;
   return INCREMENT_EOK;
 };
 
 export const getPriceTierLabel = (currentPrice) => {
   const price = toBidPriceBigInt(currentPrice);
-  if (price < TIER_THOUSAND) return "백 단위";
-  if (price < TIER_EOK) return "천 단위";
+  if (price < TIER_BAEKMAN) return "백만 단위";
+  if (price < TIER_CHEONMAN) return "천만 단위";
   return "억 단위";
 };
 
