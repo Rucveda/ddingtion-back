@@ -455,10 +455,11 @@ router.post('/login', async (req, res) => {
       user.role = "WRITER";
     }
 
+    const rememberMe = req.body?.rememberMe === true || req.body?.rememberMe === "true";
     const token = jwt.sign(
-      { id: user.id, ingameName: user.ingameName, role: user.role }, 
-      JWT_SECRET, 
-      { expiresIn: '24h' }
+      { id: user.id, ingameName: user.ingameName, role: user.role },
+      JWT_SECRET,
+      { expiresIn: rememberMe ? "30d" : "24h" },
     );
 
     const { passwordHash: _ph, discordId, ...pub } = user;

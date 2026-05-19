@@ -2,6 +2,12 @@ import prisma from './db.js';
 import jwt from 'jsonwebtoken';
 import { env, isDiscordVerificationEnforced } from './config/env.js';
 import { createRedisClient } from './lib/redis.js';
+import {
+  computeExtendedEndTime,
+  getMinimumBid,
+  shouldExtendAuctionOnBid,
+} from './lib/bidIncrement.js';
+import { rescheduleAuctionEndJob } from './lib/auctionQueueJobs.js';
 
 const setupSocket = (io) => {
   // --- [Redis Pub/Sub 구독 설정 (워커 이벤트 수신용)] ---
@@ -94,10 +100,16 @@ const setupSocket = (io) => {
           if (!auction || auction.status !== 'ACTIVE') {
             throw new Error("이미 종료되었거나 무효한 경매입니다.");
           }
-          const currentPrice = BigInt(auction.currentPrice);
-          const minimumBid = currentPrice + ((currentPrice + 9n) / 10n);
+
+          const bidNow = new Date();
+          const auctionEndTime = new Date(auction.endTime);
+          if (auctionEndTime.getTime() <= bidNow.getTime()) {
+            throw new Error("이미 마감된 경매입니다.");
+          }
+
+          const minimumBid = getMinimumBid(auction.currentPrice, auctionEndTime, bidNow);
           if (parsedBidAmount < minimumBid) {
-            throw new Error(`최소 입찰가는 ${minimumBid.toString()}G 입니다.`);
+            throw new Error(`최소 입찰가는 ${minimumBid.toString()}G 입니다. (마감 임박 시 최소 인상이 커질 수 있습니다)`);
           }
           if (auction.buyNowPrice && parsedBidAmount >= BigInt(auction.buyNowPrice)) {
             throw new Error("즉시 구매가 이상의 금액은 입찰할 수 없습니다. 즉시 구매 기능을 이용해주세요.");
@@ -112,6 +124,9 @@ const setupSocket = (io) => {
             throw new Error("동일한 네트워크(IP) 환경에서는 입찰할 수 없습니다. (다중 계정 악용 방지)");
           }
 
+          const willExtend = shouldExtendAuctionOnBid(auctionEndTime, bidNow);
+          const nextEndTime = willExtend ? computeExtendedEndTime(auctionEndTime, bidNow) : auctionEndTime;
+
           const newBid = await tx.bid.create({ 
             data: { 
               auctionId: parsedAuctionId,
@@ -123,16 +138,25 @@ const setupSocket = (io) => {
 
           const auctionUpdate = await tx.auction.update({
             where: { id: parsedAuctionId },
-            data: { currentPrice: parsedBidAmount },
+            data: {
+              currentPrice: parsedBidAmount,
+              ...(willExtend ? { endTime: nextEndTime } : {}),
+            },
             include: { item: true }
           });
 
-          return { newBid, auctionUpdate };
+          return { newBid, auctionUpdate, extended: willExtend, endTime: auctionUpdate.endTime };
         });
+
+        if (result.extended) {
+          await rescheduleAuctionEndJob(parsedAuctionId, result.endTime);
+        }
 
         io.to(`auction_${parsedAuctionId}`).emit('bid_updated', {
           newPrice: result.newBid.bidAmount.toString(),
-          bidderName: result.newBid.bidder.ingameName
+          bidderName: result.newBid.bidder.ingameName,
+          endTime: result.endTime.toISOString(),
+          extended: result.extended,
         });
 
         if (prevHighestBid && prevHighestBid.bidderId !== parsedUserId) {
