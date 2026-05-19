@@ -94,5 +94,14 @@ export const ensureRuntimeSchema = async (prisma) => {
     CREATE UNIQUE INDEX IF NOT EXISTS "Report_roomId_key" ON "Report"("roomId");
   `);
 
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "PostCategoryGuide" (
+      "category" TEXT NOT NULL,
+      "guideText" TEXT NOT NULL,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "PostCategoryGuide_pkey" PRIMARY KEY ("category")
+    );
+  `);
+
   console.log("✅ 런타임 DB 스키마 확인 완료");
 };

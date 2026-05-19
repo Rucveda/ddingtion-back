@@ -4,12 +4,24 @@ import prisma from '../db.js';
 import authenticateToken from '../middlewares/authMiddleware.js';
 import { checkDiscordLinked } from '../middlewares/discordCheck.js';
 import { rejectBannedAccount } from '../middlewares/accessGuards.js';
+import {
+  isKnownPostCategory,
+  normalizeWritablePostCategory,
+} from '../lib/postCategories.js';
+import { loadPostCategoryGuides } from '../lib/postCategoryGuides.js';
 
-const POST_CATEGORIES = new Set(['GENERAL', 'WILD', 'ISLAND', 'RPG', 'TRADE', 'QUESTION']);
-const normalizePostCategory = (category) => {
-  const normalized = String(category || 'GENERAL').trim().toUpperCase();
-  return POST_CATEGORIES.has(normalized) ? normalized : 'GENERAL';
-};
+/**
+ * 말머리별 안내 문구 (공개 조회)
+ */
+router.get('/category-guides', async (req, res) => {
+  try {
+    const guides = await loadPostCategoryGuides();
+    res.json({ guides });
+  } catch (error) {
+    console.error("❌ GET /api/posts/category-guides Error:", error);
+    res.status(500).json({ error: "말머리 안내 로드 실패" });
+  }
+});
 
 /**
  * 글 목록 조회
@@ -19,19 +31,20 @@ router.get('/', async (req, res) => {
     const { type, category } = req.query;
     let whereClause = {};
     
-    // 공지사항인지 확인
     const isNoticeRequest = type && type.toUpperCase() === 'NOTICE';
 
     if (type) {
       whereClause.type = type.toUpperCase(); 
     }
     if (category && String(category).toUpperCase() !== 'ALL') {
-      whereClause.category = normalizePostCategory(category);
+      const normalized = String(category).trim().toUpperCase();
+      if (isKnownPostCategory(normalized)) {
+        whereClause.category = normalized;
+      }
     }
 
     const posts = await prisma.post.findMany({
       where: whereClause,
-      // 💡 [핵심 패치] 공지사항이면 1개만, 일반 게시글이면 50개(기본) 로드
       take: isNoticeRequest ? 1 : 50,
       include: {
         author: {
@@ -53,7 +66,7 @@ router.get('/', async (req, res) => {
  */
 router.post('/', authenticateToken, rejectBannedAccount, checkDiscordLinked, async (req, res) => {
   try {
-    const { title, content, type = "GENERAL", category = "GENERAL" } = req.body;
+    const { title, content, type = "GENERAL", category = "WILD" } = req.body;
     const userRole = req.user.role ? req.user.role.toUpperCase() : 'USER';
     const postType = type.toUpperCase();
 
@@ -70,7 +83,7 @@ router.post('/', authenticateToken, rejectBannedAccount, checkDiscordLinked, asy
         title,
         content,
         type: postType,
-        category: postType === 'GENERAL' ? normalizePostCategory(category) : 'NOTICE',
+        category: postType === 'GENERAL' ? normalizeWritablePostCategory(category) : 'NOTICE',
         authorId: req.user.id
       }
     });

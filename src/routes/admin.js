@@ -10,6 +10,8 @@ import { Queue } from 'bullmq';
 import { env } from '../config/env.js';
 import { createRedisClient } from '../lib/redis.js';
 import bcrypt from 'bcrypt';
+import { savePostCategoryGuide } from '../lib/postCategoryGuides.js';
+import { WRITABLE_POST_CATEGORIES } from '../lib/postCategories.js';
 
 // ✅ Supabase 클라이언트 설정
 const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY);
@@ -247,6 +249,30 @@ router.get('/reports', async (req, res) => {
 /**
  * [PATCH] 신고 사건 처리 상태 변경
  */
+/**
+ * [PATCH] 커뮤니티 말머리 안내 문구 수정
+ */
+router.patch('/posts/category-guides/:category', async (req, res) => {
+  try {
+    const category = String(req.params.category || '').trim().toUpperCase();
+    if (!WRITABLE_POST_CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: "유효하지 않은 말머리입니다." });
+    }
+    const row = await savePostCategoryGuide(category, req.body?.guideText);
+    res.json({
+      message: "말머리 안내 문구가 저장되었습니다.",
+      category: row.category,
+      guideText: row.guideText,
+    });
+  } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    console.error("Category guide save error:", error);
+    res.status(500).json({ error: "안내 문구 저장 실패" });
+  }
+});
+
 router.patch('/reports/:id/resolve', async (req, res) => {
   try {
     const updatedReport = await prisma.report.update({
