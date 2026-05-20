@@ -103,6 +103,22 @@ export const ensureRuntimeSchema = async (prisma) => {
   `);
 
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Auction" ADD COLUMN IF NOT EXISTS "quality" INTEGER;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Auction" ADD COLUMN IF NOT EXISTS "lampLines" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "MarketHistory" ADD COLUMN IF NOT EXISTS "quality" INTEGER;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "MarketHistory" ADD COLUMN IF NOT EXISTS "lampLines" JSONB;
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "PostCategoryGuide" (
       "category" TEXT NOT NULL,
       "guideText" TEXT NOT NULL,

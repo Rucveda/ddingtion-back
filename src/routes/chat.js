@@ -194,6 +194,8 @@ router.patch('/rooms/:id/close', async (req, res) => {
           price: auction.currentPrice,
           enhancementLevel: auction.enhancementLevel,
           enhancementRank: auction.enhancementRank,
+          quality: auction.quality,
+          lampLines: auction.lampLines,
           enchantments: auction.enchantments,
           imprint: auction.imprint,
           skills: auction.skills,

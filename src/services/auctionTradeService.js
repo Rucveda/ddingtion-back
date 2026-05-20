@@ -11,7 +11,40 @@ export class AuctionServiceError extends Error {
 export const createAuctionListing = async ({ userId, body, redisConnection, auctionQueue, clientIp }) => {
   await redisConnection.set(`user_ip:${userId}`, clientIp, "EX", 86400);
 
-  const { itemId, startPrice, buyNowPrice, durationDays, durationHours, enhancementLevel, enhancementRank, enchantments, imprints, skills, runes, description } = body;
+  const {
+    itemId,
+    startPrice,
+    buyNowPrice,
+    durationDays,
+    durationHours,
+    enhancementLevel,
+    enhancementRank,
+    quality,
+    lampLines,
+    enchantments,
+    imprints,
+    skills,
+    runes,
+    description,
+  } = body;
+
+  const parsedQuality =
+    quality === undefined || quality === null || quality === ""
+      ? null
+      : parseInt(quality, 10);
+  if (parsedQuality !== null && (!Number.isInteger(parsedQuality) || parsedQuality < 0)) {
+    throw new AuctionServiceError("품질은 0 이상의 정수여야 합니다.", 400);
+  }
+
+  let parsedLampLines = null;
+  if (lampLines !== undefined && lampLines !== null) {
+    if (Array.isArray(lampLines)) {
+      const lines = lampLines.map((line) => String(line).trim()).filter(Boolean).slice(0, 2);
+      parsedLampLines = lines.length > 0 ? lines : null;
+    } else {
+      throw new AuctionServiceError("램프 옵션 형식이 올바르지 않습니다.", 400);
+    }
+  }
 
   const parsedStartPrice = BigInt(startPrice);
   if (parsedStartPrice <= 0n) {
@@ -43,6 +76,8 @@ export const createAuctionListing = async ({ userId, body, redisConnection, auct
       description: description ? String(description).slice(0, 500) : null,
       enhancementLevel: parseInt(enhancementLevel) || 0,
       enhancementRank,
+      quality: parsedQuality,
+      lampLines: parsedLampLines,
       enchantments,
       imprint: imprints,
       skills,
@@ -95,6 +130,8 @@ export const relistAuction = async ({ auctionId, userId, body, redisConnection, 
       durationDays: "1",
       enhancementLevel: sourceAuction.enhancementLevel,
       enhancementRank: sourceAuction.enhancementRank,
+      quality: sourceAuction.quality,
+      lampLines: sourceAuction.lampLines,
       enchantments: sourceAuction.enchantments,
       imprints: sourceAuction.imprint,
       skills: sourceAuction.skills,

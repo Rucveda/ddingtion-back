@@ -79,6 +79,8 @@ model Auction {
   
   enhancementLevel   Int           @default(0)
   enhancementRank    String?
+  quality            Int?
+  lampLines          Json?
   enchantments       Json?
   imprint            Json?
   skills             Json?
@@ -181,6 +183,8 @@ model MarketHistory {
   
   enhancementLevel   Int      @default(0)
   enhancementRank    String?
+  quality            Int?
+  lampLines          Json?
   enchantments       Json?
   imprint            Json?
   skills             Json?
