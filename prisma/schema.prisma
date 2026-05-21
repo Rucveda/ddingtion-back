@@ -93,6 +93,8 @@ model Auction {
   endTime            DateTime
   status             AuctionStatus @default(ACTIVE)
   cancelRequestedAt  DateTime?
+  /** 재등록 완료 시각 — 동일 만료 건 중복 재등록 방지 */
+  relistedAt         DateTime?
 
   seller             User          @relation("SellerAuctions", fields: [sellerId], references: [id])
   item               Item          @relation(fields: [itemId], references: [id])

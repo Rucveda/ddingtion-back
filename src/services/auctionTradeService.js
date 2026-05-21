@@ -117,8 +117,11 @@ export const relistAuction = async ({ auctionId, userId, body, redisConnection, 
   if (sourceAuction.bids.length > 0) {
     throw new AuctionServiceError("입찰 기록이 있는 경매는 다시 등록할 수 없습니다.", 400);
   }
+  if (sourceAuction.relistedAt) {
+    throw new AuctionServiceError("이미 다시 등록된 경매입니다.", 400);
+  }
 
-  return createAuctionListing({
+  const newAuction = await createAuctionListing({
     userId,
     redisConnection,
     auctionQueue,
@@ -140,6 +143,13 @@ export const relistAuction = async ({ auctionId, userId, body, redisConnection, 
       ...body,
     },
   });
+
+  await prisma.auction.update({
+    where: { id: auctionId },
+    data: { relistedAt: new Date() },
+  });
+
+  return newAuction;
 };
 
 export const buyNowAuction = async ({ auctionId, user, redisConnection, auctionQueue, clientIp }) => {
