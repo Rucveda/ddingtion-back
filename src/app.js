@@ -12,14 +12,7 @@ import setupSocket from './socket.js';
 // [워커 가동]
 import './workers/auctionWorker.js'; 
 
-// --- [라우터 임포트] ---
-import authRoutes from './routes/auth.js';
-import auctionRoutes from './routes/auctions.js';
-import adminRoutes from './routes/admin.js'; 
-import chatRoutes from './routes/chat.js'; 
-import notificationRoutes from './routes/notifications.js';
-import reviewRoutes from './routes/reviews.js';
-import postsRoutes from './routes/posts.js';
+import { mountApiRoutes } from './routes/index.js';
 import { attachClientIp, rejectStrictBannedIp } from './middlewares/accessGuards.js';
 
 const app = express();
@@ -60,14 +53,7 @@ app.use(express.json());
 app.use(attachClientIp);
 app.use('/api', rejectStrictBannedIp);
 
-// --- [라우터 등록] ---
-app.use('/api/auth', authRoutes);      
-app.use('/api/auctions', auctionRoutes); 
-app.use('/api/admin', adminRoutes);    
-app.use('/api/chat', chatRoutes); 
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/posts', postsRoutes); 
+mountApiRoutes(app);
 
 const PORT = Number(env.PORT);
 

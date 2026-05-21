@@ -5,19 +5,6 @@ export const getAuctionItems = async () => {
   return prisma.item.findMany({ orderBy: { name: "asc" } });
 };
 
-export const getCompletedHistory = async ({ itemId, limit }) => {
-  const completedAuctions = await prisma.marketHistory.findMany({
-    where: { itemId, isValid: true },
-    orderBy: { tradeDate: "desc" },
-    take: limit,
-  });
-
-  return completedAuctions.map((a) => ({
-    ...a,
-    price: a.price.toString(),
-  }));
-};
-
 export const getActiveAuctions = async () => {
   const now = new Date();
   const auctions = await prisma.auction.findMany({
