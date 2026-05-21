@@ -62,7 +62,7 @@ export const updateMinecraftName = async (userId, minecraftName) => {
 
   return prisma.user.update({
     where: { id: userId },
-    data: { loginId: minecraftName, ingameName: minecraftName },
+    data: { ingameName: minecraftName },
     select: publicUserSelect,
   });
 };
