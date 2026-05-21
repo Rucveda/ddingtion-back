@@ -24,8 +24,9 @@ router.get("/", async (_req, res) => {
   try {
     const safeData = await getActiveAuctions();
     res.status(200).json(Array.isArray(safeData) ? safeData : []);
-  } catch {
-    res.status(200).json([]);
+  } catch (error) {
+    console.error("[GET /api/auctions] 목록 조회 실패:", error);
+    res.status(500).json({ error: "경매 목록을 불러오지 못했습니다." });
   }
 });
 
