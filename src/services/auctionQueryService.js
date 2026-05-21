@@ -1,5 +1,6 @@
 import prisma from "../db.js";
 import { attachMarketReflected } from "../lib/marketHistoryRef.js";
+import { SYSTEM_CHECK_DESC_PREFIX } from "../services/systemCheck/constants.js";
 
 export const getAuctionItems = async () => {
   return prisma.item.findMany({ orderBy: { name: "asc" } });
@@ -8,7 +9,11 @@ export const getAuctionItems = async () => {
 export const getActiveAuctions = async () => {
   const now = new Date();
   const auctions = await prisma.auction.findMany({
-    where: { status: { in: ["ACTIVE", "CANCEL_PENDING"] }, endTime: { gt: now } },
+    where: {
+      status: { in: ["ACTIVE", "CANCEL_PENDING"] },
+      endTime: { gt: now },
+      NOT: { description: { startsWith: SYSTEM_CHECK_DESC_PREFIX } },
+    },
     include: {
       item: true,
       seller: { select: { id: true, ingameName: true, reputationScore: true } },

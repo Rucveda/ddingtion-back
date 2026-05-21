@@ -7,6 +7,7 @@ import itemsRoutes from "./items.js";
 import supportRoutes from "./support.js";
 import auctionsRoutes from "./auctions.js";
 import usersRoutes from "./users.js";
+import healthChecksRoutes from "./healthChecks.js";
 
 const router = express.Router();
 
@@ -19,5 +20,6 @@ router.use("/items", itemsRoutes);
 router.use("/support", supportRoutes);
 router.use("/auctions", auctionsRoutes);
 router.use("/users", usersRoutes);
+router.use("/health-checks", healthChecksRoutes);
 
 export default router;
