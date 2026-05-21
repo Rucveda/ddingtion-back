@@ -16,8 +16,13 @@ export const startPasswordResetAuthorize = async (loginId) => {
     throw new AuthServiceError("마인크래프트 닉네임을 입력해주세요.", 400);
   }
 
-  const user = await prisma.user.findUnique({
-    where: { loginId: trimmed },
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { loginId: { equals: trimmed, mode: "insensitive" } },
+        { ingameName: { equals: trimmed, mode: "insensitive" } },
+      ],
+    },
     select: { id: true, isBanned: true, discordId: true },
   });
 

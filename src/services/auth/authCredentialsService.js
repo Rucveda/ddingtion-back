@@ -54,8 +54,14 @@ export const login = async ({ loginId, password, rememberMe, clientIp }) => {
   await enforceLoginRateLimit(clientIp);
 
   const trimmedLoginId = loginId.trim();
-  const user = await prisma.user.findUnique({
-    where: { loginId: trimmedLoginId },
+  // 로그인 UI는 "마인크래프트 닉네임"을 받으므로 loginId·ingameName 모두 조회
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { loginId: { equals: trimmedLoginId, mode: "insensitive" } },
+        { ingameName: { equals: trimmedLoginId, mode: "insensitive" } },
+      ],
+    },
     select: {
       id: true,
       loginId: true,

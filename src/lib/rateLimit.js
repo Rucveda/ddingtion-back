@@ -40,38 +40,57 @@ export const enforceMinInterval = async (key, intervalMs, message) => {
   await redis.set(key, String(Date.now()), "EX", Math.ceil(intervalMs / 1000) + 5);
 };
 
+const isRedisUnavailable = (error) =>
+  error?.code === "ECONNREFUSED" ||
+  error?.message?.includes("ECONNREFUSED") ||
+  error?.name === "MaxRetriesPerRequestError";
+
 /** 로그인: 5분 내 20회 초과 시 10분 차단 */
 export const enforceLoginRateLimit = async (ip) => {
   const normalizedIp = ip || "unknown";
   const blockKey = `rate:login:block:${normalizedIp}`;
-  const blockedUntil = await redis.get(blockKey);
-  if (blockedUntil) {
-    throw new RateLimitError(
-      "로그인 시도가 너무 많습니다. 10분 후 다시 시도해주세요.",
-      secondsUntil(Number(blockedUntil)),
-    );
-  }
-
   const attemptsKey = `rate:login:attempts:${normalizedIp}`;
-  const count = await redis.incr(attemptsKey);
-  if (count === 1) {
-    await redis.expire(attemptsKey, RATE_LIMIT.LOGIN_WINDOW_SEC);
-  }
-  if (count > RATE_LIMIT.LOGIN_MAX_ATTEMPTS) {
-    const until = Date.now() + RATE_LIMIT.LOGIN_BLOCK_SEC * 1000;
-    await redis.set(blockKey, String(until), "EX", RATE_LIMIT.LOGIN_BLOCK_SEC);
-    await redis.del(attemptsKey);
-    throw new RateLimitError(
-      "로그인 시도가 너무 많습니다. 10분 후 다시 시도해주세요.",
-      RATE_LIMIT.LOGIN_BLOCK_SEC,
-    );
+
+  try {
+    const blockedUntil = await redis.get(blockKey);
+    if (blockedUntil) {
+      throw new RateLimitError(
+        "로그인 시도가 너무 많습니다. 10분 후 다시 시도해주세요.",
+        secondsUntil(Number(blockedUntil)),
+      );
+    }
+
+    const count = await redis.incr(attemptsKey);
+    if (count === 1) {
+      await redis.expire(attemptsKey, RATE_LIMIT.LOGIN_WINDOW_SEC);
+    }
+    if (count > RATE_LIMIT.LOGIN_MAX_ATTEMPTS) {
+      const until = Date.now() + RATE_LIMIT.LOGIN_BLOCK_SEC * 1000;
+      await redis.set(blockKey, String(until), "EX", RATE_LIMIT.LOGIN_BLOCK_SEC);
+      await redis.del(attemptsKey);
+      throw new RateLimitError(
+        "로그인 시도가 너무 많습니다. 10분 후 다시 시도해주세요.",
+        RATE_LIMIT.LOGIN_BLOCK_SEC,
+      );
+    }
+  } catch (error) {
+    if (error instanceof RateLimitError) throw error;
+    if (isRedisUnavailable(error)) {
+      console.warn("⚠️ Redis 미연결 — 로그인 rate limit 생략");
+      return;
+    }
+    throw error;
   }
 };
 
 export const clearLoginRateLimit = async (ip) => {
   const normalizedIp = ip || "unknown";
-  await redis.del(`rate:login:attempts:${normalizedIp}`);
-  await redis.del(`rate:login:block:${normalizedIp}`);
+  try {
+    await redis.del(`rate:login:attempts:${normalizedIp}`);
+    await redis.del(`rate:login:block:${normalizedIp}`);
+  } catch (error) {
+    if (!isRedisUnavailable(error)) throw error;
+  }
 };
 
 /** 댓글: 3초 간격 + 1분 15개 초과 시 10분 차단 */
