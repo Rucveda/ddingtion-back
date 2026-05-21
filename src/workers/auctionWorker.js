@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import { createRedisClient } from '../lib/redis.js';
-import { finalizeSellerCancel } from '../lib/auctionCancel.js';
+import { finalizeSellerCancel } from '../domain/auction/auctionCancel.js';
 import { finalizeActiveAuctionEnd } from '../domain/auction/finalizeAuctionEnd.js';
 
 // 💡 패치: 클라우드 Redis(Render, Upstash 등)를 위한 TLS 설정 및 퍼블리셔 추가

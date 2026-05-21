@@ -13,6 +13,5 @@ export const listSupportRooms = () =>
 export const deleteSupportRoom = (roomId) =>
   prisma.$transaction([
     prisma.message.deleteMany({ where: { roomId } }),
-    prisma.report.deleteMany({ where: { roomId } }),
     prisma.chatRoom.delete({ where: { id: roomId } }),
   ]);

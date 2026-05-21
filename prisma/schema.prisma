@@ -12,7 +12,6 @@ enum AuctionStatus {
   ACTIVE
   PENDING_TRADE
   COMPLETED
-  DISPUTED
   CANCELED
   CANCEL_PENDING
   EXPIRED
@@ -52,9 +51,6 @@ model User {
   givenReviews       Review[]        @relation("Reviewer")
   receivedReviews    Review[]        @relation("Reviewee")
   auctionComments    AuctionComment[]
-  sentReports        Report[]        @relation("Reporter")
-  receivedReports    Report[]        @relation("Target")
-  
   // 💡 [확장] 유저가 작성한 게시글 관계 추가
   posts              Post[]
 
@@ -234,7 +230,6 @@ model ChatRoom {
   seller       User     @relation("SellerChatRooms", fields: [sellerId], references: [id])
   buyer        User     @relation("BuyerChatRooms", fields: [buyerId], references: [id])
   messages     Message[]
-  reports      Report[]
 
   @@index([sellerId, status])
   @@index([buyerId, status])
@@ -273,22 +268,4 @@ model Review {
 
   @@index([revieweeId])
   @@index([auctionId, reviewerId])
-}
-
-model Report {
-  id                    Int      @id @default(autoincrement())
-  roomId                Int
-  auctionId             Int?
-  reporterId            Int
-  targetId              Int
-  reason                String   @db.Text
-  isResolved            Boolean  @default(false)
-  previousAuctionStatus String?
-  createdAt             DateTime @default(now())
-
-  room        ChatRoom @relation(fields: [roomId], references: [id])
-  reporter    User     @relation("Reporter", fields: [reporterId], references: [id])
-  target      User     @relation("Target", fields: [targetId], references: [id])
-
-  @@unique([roomId])
 }

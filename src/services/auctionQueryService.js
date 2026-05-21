@@ -1,6 +1,5 @@
 import prisma from "../db.js";
 import { attachMarketReflected } from "../lib/marketHistoryRef.js";
-import { isSystemCheckDescription } from "../services/systemCheck/constants.js";
 
 export const getAuctionItems = async () => {
   return prisma.item.findMany({ orderBy: { name: "asc" } });
@@ -21,8 +20,7 @@ export const getActiveAuctions = async () => {
     take: 200,
   });
 
-  // NOT + startsWith 는 description=null 행을 SQL에서 제외함 → 설명 없는 일반 경매가 목록에서 빠지는 버그 방지
-  return auctions.filter((a) => !isSystemCheckDescription(a.description)).map((a) => ({
+  return auctions.map((a) => ({
     ...a,
     startPrice: a.startPrice.toString(),
     currentPrice: a.currentPrice.toString(),

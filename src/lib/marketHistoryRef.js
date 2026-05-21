@@ -2,7 +2,6 @@ import prisma from "../db.js";
 
 /**
  * 거래 완료 건이 시세(MarketHistory)에 유효 반영되어 있는지 확인합니다.
- * 관리자가 거래 기록을 삭제하거나 무효 처리한 경우 false.
  */
 export const isMarketReflected = async (auction) => {
   if (!auction || auction.status !== "COMPLETED") return false;
@@ -11,27 +10,33 @@ export const isMarketReflected = async (auction) => {
     where: { auctionId: auction.id },
     select: { isValid: true },
   });
-  if (linked) return linked.isValid;
-
-  const legacy = await prisma.marketHistory.findFirst({
-    where: {
-      itemId: auction.itemId,
-      price: BigInt(auction.currentPrice),
-      enhancementLevel: auction.enhancementLevel ?? 0,
-      enhancementRank: auction.enhancementRank ?? null,
-      isValid: true,
-    },
-    select: { id: true },
-  });
-  return Boolean(legacy);
+  return Boolean(linked?.isValid);
 };
 
+/** 목록 API용 — auctionId 기준 일괄 조회 (N+1 방지) */
 export const attachMarketReflected = async (auctions) => {
   const list = Array.isArray(auctions) ? auctions : [];
-  return Promise.all(
-    list.map(async (auction) => ({
-      ...auction,
-      marketReflected: await isMarketReflected(auction),
-    }))
+  const completedIds = list
+    .filter((a) => a.status === "COMPLETED")
+    .map((a) => a.id);
+
+  if (completedIds.length === 0) {
+    return list.map((auction) => ({ ...auction, marketReflected: false }));
+  }
+
+  const histories = await prisma.marketHistory.findMany({
+    where: { auctionId: { in: completedIds } },
+    select: { auctionId: true, isValid: true },
+  });
+  const validByAuctionId = new Map(
+    histories.map((h) => [h.auctionId, h.isValid]),
   );
+
+  return list.map((auction) => ({
+    ...auction,
+    marketReflected:
+      auction.status === "COMPLETED"
+        ? (validByAuctionId.get(auction.id) ?? false)
+        : false,
+  }));
 };

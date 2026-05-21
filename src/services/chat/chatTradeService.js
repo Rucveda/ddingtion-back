@@ -1,5 +1,4 @@
 import prisma from "../../db.js";
-import { submitTradeRoomReport } from "../../domain/trade/tradeReport.js";
 import { ChatServiceError } from "./chatErrors.js";
 import { includeRoomRelations } from "./chatShared.js";
 
@@ -119,31 +118,4 @@ export const confirmTradeClose = async (roomId, userId) => {
     message: "양측 거래 확정이 완료되었습니다.",
     room: completedRoom,
   };
-};
-
-export const submitRoomReport = async ({ roomId, reporterId, targetId, reason }) => {
-  if (Number.isNaN(roomId)) {
-    throw new ChatServiceError("유효하지 않은 채팅방입니다.", 400);
-  }
-  if (!reason?.trim()) {
-    throw new ChatServiceError("신고 사유를 입력해주세요.", 400);
-  }
-  if (!targetId) {
-    throw new ChatServiceError("신고 대상을 지정해주세요.", 400);
-  }
-
-  try {
-    const { report } = await submitTradeRoomReport({
-      roomId,
-      reporterId,
-      targetId: parseInt(targetId, 10),
-      reason: reason.trim(),
-    });
-    return report;
-  } catch (error) {
-    if (error.status) {
-      throw new ChatServiceError(error.message, error.status, error.code);
-    }
-    throw error;
-  }
 };

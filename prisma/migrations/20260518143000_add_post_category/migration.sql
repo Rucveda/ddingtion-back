@@ -1,3 +1,0 @@
-ALTER TABLE "Post" ADD COLUMN IF NOT EXISTS "category" TEXT NOT NULL DEFAULT 'GENERAL';
-
-CREATE INDEX IF NOT EXISTS "Post_category_idx" ON "Post"("category");

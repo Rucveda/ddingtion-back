@@ -4,7 +4,6 @@ import http from 'http';
 import { Server } from 'socket.io';
 import prisma from './db.js';
 import { env, getDiscordConfigStatus } from './config/env.js';
-import { ensureRuntimeSchema } from './lib/runtimeSchema.js';
 
 // [소켓 모듈 분리]
 import setupSocket from './socket.js';
@@ -51,6 +50,11 @@ app.use(cors({
 
 app.use(express.json());
 app.use(attachClientIp);
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use('/api', rejectStrictBannedIp);
 
 mountApiRoutes(app);
@@ -61,7 +65,6 @@ const startServer = async () => {
   try {
     await prisma.$connect();
     console.log("✅ 데이터베이스(PostgreSQL) 연결 성공!");
-    await ensureRuntimeSchema(prisma);
     const discordConfig = getDiscordConfigStatus();
     console.log(
       `✅ Discord 인증 설정: ${discordConfig.enabled ? "활성" : "비활성"}${discordConfig.missing.length ? ` (누락: ${discordConfig.missing.join(", ")})` : ""}`,
@@ -71,7 +74,7 @@ const startServer = async () => {
       console.log(`🚀 DDINGTION 백엔드 서버 실행 중: ${PORT}`);
     });
   } catch (err) {
-    console.error("❌ DB 연결 또는 런타임 스키마 확인 실패:", err);
+    console.error("❌ DB 연결 실패:", err);
     process.exit(1); 
   }
 };
