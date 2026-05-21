@@ -1,6 +1,6 @@
 import prisma from "../db.js";
 import { attachMarketReflected } from "../lib/marketHistoryRef.js";
-import { SYSTEM_CHECK_DESC_PREFIX } from "../services/systemCheck/constants.js";
+import { isSystemCheckDescription } from "../services/systemCheck/constants.js";
 
 export const getAuctionItems = async () => {
   return prisma.item.findMany({ orderBy: { name: "asc" } });
@@ -12,7 +12,6 @@ export const getActiveAuctions = async () => {
     where: {
       status: { in: ["ACTIVE", "CANCEL_PENDING"] },
       endTime: { gt: now },
-      NOT: { description: { startsWith: SYSTEM_CHECK_DESC_PREFIX } },
     },
     include: {
       item: true,
@@ -22,7 +21,8 @@ export const getActiveAuctions = async () => {
     take: 200,
   });
 
-  return auctions.map((a) => ({
+  // NOT + startsWith 는 description=null 행을 SQL에서 제외함 → 설명 없는 일반 경매가 목록에서 빠지는 버그 방지
+  return auctions.filter((a) => !isSystemCheckDescription(a.description)).map((a) => ({
     ...a,
     startPrice: a.startPrice.toString(),
     currentPrice: a.currentPrice.toString(),
