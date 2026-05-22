@@ -1,7 +1,8 @@
 import { ChatServiceError } from "../../services/chat/chatErrors.js";
+import { ReportServiceError } from "../../services/trade/reportErrors.js";
 
 export const sendChatError = (res, error, fallbackMessage) => {
-  if (error instanceof ChatServiceError) {
+  if (error instanceof ChatServiceError || error instanceof ReportServiceError) {
     const body = { error: error.message };
     if (error.code) body.code = error.code;
     return res.status(error.status).json(body);

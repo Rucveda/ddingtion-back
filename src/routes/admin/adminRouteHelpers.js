@@ -1,7 +1,8 @@
 import { AdminServiceError } from "../../services/admin/adminErrors.js";
+import { ReportServiceError } from "../../services/trade/reportErrors.js";
 
 export const sendAdminError = (res, error, fallbackMessage) => {
-  if (error instanceof AdminServiceError) {
+  if (error instanceof AdminServiceError || error instanceof ReportServiceError) {
     return res.status(error.status).json({ error: error.message });
   }
   if (error?.status && error?.message) {

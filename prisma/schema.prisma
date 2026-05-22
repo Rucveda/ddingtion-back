@@ -24,6 +24,19 @@ enum PostType {
   GUIDE    // 가이드/도움말
 }
 
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportResolution {
+  DISMISS
+  BAN
+  STRICT_BAN
+  WARNING
+}
+
 // 3. 모델 정의
 model User {
   id                Int      @id @default(autoincrement())
@@ -53,6 +66,9 @@ model User {
   auctionComments    AuctionComment[]
   // 💡 [확장] 유저가 작성한 게시글 관계 추가
   posts              Post[]
+  reportsFiled       Report[]       @relation("ReportsFiled")
+  reportsReceived    Report[]       @relation("ReportsReceived")
+  reportsResolved    Report[]       @relation("ReportsResolved")
 
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
@@ -98,6 +114,7 @@ model Auction {
   chatRoom           ChatRoom?
   reviews            Review[]
   comments           AuctionComment[]
+  reports            Report[]
 
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
@@ -230,6 +247,7 @@ model ChatRoom {
   seller       User     @relation("SellerChatRooms", fields: [sellerId], references: [id])
   buyer        User     @relation("BuyerChatRooms", fields: [buyerId], references: [id])
   messages     Message[]
+  report       Report?
 
   @@index([sellerId, status])
   @@index([buyerId, status])
@@ -268,4 +286,29 @@ model Review {
 
   @@index([revieweeId])
   @@index([auctionId, reviewerId])
+}
+
+model Report {
+  id                    Int               @id @default(autoincrement())
+  roomId                Int               @unique
+  auctionId             Int
+  reporterId            Int
+  targetId              Int
+  reason                String            @db.Text
+  status                ReportStatus      @default(PENDING)
+  resolution            ReportResolution?
+  resolvedById          Int?
+  resolvedAt            DateTime?
+  previousAuctionStatus AuctionStatus
+
+  room                  ChatRoom          @relation(fields: [roomId], references: [id])
+  auction               Auction           @relation(fields: [auctionId], references: [id])
+  reporter              User              @relation("ReportsFiled", fields: [reporterId], references: [id])
+  target                User              @relation("ReportsReceived", fields: [targetId], references: [id])
+  resolvedBy            User?             @relation("ReportsResolved", fields: [resolvedById], references: [id])
+
+  createdAt             DateTime          @default(now())
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([targetId])
 }

@@ -1,0 +1,2 @@
+export const REPORT_MIN_REASON_LENGTH = 10;
+export const REPORT_REASON_PREVIEW_LENGTH = 120;

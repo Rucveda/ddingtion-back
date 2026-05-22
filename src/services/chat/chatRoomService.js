@@ -11,6 +11,7 @@ export const listActiveRooms = (userId) =>
     include: {
       seller: { select: { id: true, ingameName: true, reputationScore: true } },
       buyer: { select: { id: true, ingameName: true, reputationScore: true } },
+      auction: { select: { id: true, status: true } },
       messages: {
         orderBy: { createdAt: "desc" },
         take: 1,
